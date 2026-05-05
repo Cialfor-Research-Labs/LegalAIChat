@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 tllac/.env
+sample*.py
+sample (*.py
 
 # Python
 __pycache__/
