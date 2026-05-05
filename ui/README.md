@@ -1,30 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Experimental Chat UI
 
-# Run frontend with your Legal RAG backend
+This frontend now opens directly into the experimental legal chat.
 
-This frontend now uses `src/components/LegalChat.tsx` as the default module and calls your backend through `/api` by default.
+There is:
+- no login
+- no admin page
+- no generator/analyzer/predictor shell
+- no older main app flow
 
 ## Run locally
 
-**Prerequisites:**  Node.js
+1. Start the `tllac` backend:
 
-1. Install dependencies:
-   `npm install`
-2. Optional: set backend URL in `.env.local`:
-   `VITE_API_BASE_URL=http://localhost:8000`
-   If you do not set this, the frontend will call `/api` (recommended with reverse proxy).
-3. Start the frontend:
-   `npm run dev`
-4. Start backend (from `New code` folder):
-   `venv/bin/python retrieval_api.py`
+```bash
+cd tllac
+source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 9001
+```
 
-## Share with teammates on the same network
+Windows PowerShell:
 
-1. Configure your reverse proxy to route `/api/*` to your backend service.
-2. Start frontend:
-   `npm run dev`
-3. Share your frontend URL.
+```powershell
+cd tllac
+.\venv\Scripts\Activate.ps1
+uvicorn app.main:app --host 0.0.0.0 --port 9001
+```
 
-The frontend keeps API endpoints configurable via `VITE_API_BASE_URL` and does not hardcode server IP/port in source files.
+2. Start the frontend:
+
+```bash
+cd ui
+npm install
+npm run dev
+```
+
+3. Open the chat page directly:
+
+```text
+http://localhost:3000
+```
+
+## Optional frontend env
+
+If the browser should call a specific backend directly, set:
+
+```env
+VITE_TLLAC_API_URL=http://localhost:9001/chat
+```
+
+For LAN testing, replace `localhost` with the server IP.

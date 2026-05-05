@@ -18,7 +18,7 @@ from .routes.chat import router as chat_router
 app = FastAPI(
     title="Trained Legal AI Chat Backend (TLLAC)",
     description="Isolated backend serving the experimental chat UI. "
-                "Strictly enforces Indian Legal context responses.",
+                "Provides Indian legal and legal-adjacent responses.",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -52,5 +52,5 @@ async def root():
         "service": "TLLAC — Trained Legal AI Chat",
         "version": "1.0.0",
         "port": 9001,
-        "isolation": "strict",
+        "isolation": "indian-legal",
     }

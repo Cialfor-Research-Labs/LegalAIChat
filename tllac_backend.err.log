@@ -1,8 +1,12 @@
-INFO:     Started server process [8244]
+INFO:     Will watch for changes in these directories: ['C:\\Users\\Prerna Pandey\\LAWLLM\\tllac']
+INFO:     Uvicorn running on http://127.0.0.1:9001 (Press CTRL+C to quit)
+INFO:     Started reloader process [10084] using WatchFiles
+INFO:     Started server process [23544]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:9001 (Press CTRL+C to quit)
-INFO:tllac.routes.chat:Incoming query: Explain contract law in simple terms
-INFO:tllac.routes.chat:Generated LLM-only response (328 chars).
-INFO:tllac.routes.chat:Incoming query: explain ipc 420
-INFO:tllac.routes.chat:Generated LLM-only response (328 chars).
+INFO:tllac.routes.chat:Incoming query: i was kicked out of my rented flat without notice by my landlord. He threw all my belongings outside
+INFO:tllac.routes.chat:Returning clarifying questions instead of full analysis.
+INFO:tllac.routes.chat:Incoming query: It happened in Pune Maharashtra. Both parties are from same city
+INFO:tllac.routes.chat:Returning clarifying questions instead of full analysis.
+INFO:tllac.routes.chat:Incoming query: how does start date and ongoing date matter in this case?
+INFO:tllac.routes.chat:Generated LLM-only response (129 chars).

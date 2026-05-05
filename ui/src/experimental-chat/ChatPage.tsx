@@ -40,11 +40,15 @@ function getHostBasedTllacApiUrl(): string {
   return `${resolvedProtocol}//${resolvedHostname}:9001/chat`;
 }
 
-async function requestChatResponse(url: string, query: string): Promise<string> {
+async function requestChatResponse(
+  url: string,
+  query: string,
+  sessionId?: string | null,
+): Promise<{ responseText: string; sessionId: string | null }> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, session_id: sessionId || null }),
   });
 
   if (!res.ok) {
@@ -56,7 +60,10 @@ async function requestChatResponse(url: string, query: string): Promise<string> 
   if (!responseText) {
     throw new Error('Backend returned an empty response.');
   }
-  return responseText;
+  return {
+    responseText,
+    sessionId: typeof data?.session_id === 'string' ? data.session_id : null,
+  };
 }
 
 interface ChatPageProps {
@@ -70,6 +77,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState<{ id: string; title: string; date: string; last_message_at: string }[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   const handleSendMessage = async (content: string) => {
     // Add user message
@@ -82,21 +90,8 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    // Update history if first message
-    if (messages.length === 0) {
-      const newHistoryItem = { 
-        id: Date.now().toString(), 
-        session_id: Date.now().toString(),
-        title: content.slice(0, 30) + (content.length > 30 ? '...' : ''), 
-        date: new Date().toISOString(),
-        last_message_at: new Date().toISOString()
-      };
-      const newHistory = [newHistoryItem, ...chatHistory];
-      setChatHistory(newHistory);
-      onHistoryChange?.(newHistory);
-    }
-
-    let responseText: string;
+    let responseText = '';
+    let returnedSessionId: string | null = activeSessionId;
 
     try {
       const candidateUrls: string[] = [];
@@ -118,11 +113,12 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
       }
 
       let lastError: unknown = null;
-      responseText = '';
 
       for (const candidateUrl of candidateUrls) {
         try {
-          responseText = await requestChatResponse(candidateUrl, content);
+          const result = await requestChatResponse(candidateUrl, content, activeSessionId);
+          responseText = result.responseText;
+          returnedSessionId = result.sessionId;
           break;
         } catch (error) {
           lastError = error;
@@ -137,6 +133,23 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
       responseText = `The trained legal chat backend is unavailable right now.\n\nDetails: ${reason}`;
     }
 
+    if (returnedSessionId && returnedSessionId !== activeSessionId) {
+      setActiveSessionId(returnedSessionId);
+    }
+
+    if (messages.length === 0) {
+      const sessionKey = returnedSessionId || Date.now().toString();
+      const newHistoryItem = {
+        id: sessionKey,
+        title: content.slice(0, 30) + (content.length > 30 ? '...' : ''),
+        date: new Date().toISOString(),
+        last_message_at: new Date().toISOString()
+      };
+      const newHistory = [newHistoryItem, ...chatHistory.filter(item => item.id !== sessionKey)];
+      setChatHistory(newHistory);
+      onHistoryChange?.(newHistory);
+    }
+
     const botMessage: Message = {
       id: (Date.now() + 1).toString(),
       role: 'assistant',
@@ -149,6 +162,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
   const handleNewChat = () => {
     setMessages([]);
     setIsLoading(false);
+    setActiveSessionId(null);
   };
 
   const content = (

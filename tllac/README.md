@@ -80,7 +80,7 @@ The server will start at `http://localhost:9001`.
 
 | Condition | Response |
 |-----------|----------|
-| Query not related to Indian law | `"This is out of context"` |
+| Query not related to Indian law | `"I can help with Indian legal and legal-adjacent issues such as police complaints, cyberbullying, harassment, fraud, hacking, family disputes, contracts, property, employment, and consumer matters."` |
 | No matching trained data found | `"This is not in my trained data"` |
 
 ---
@@ -89,11 +89,12 @@ The server will start at `http://localhost:9001`.
 
 Located in `app/utils/prompt_builder.py`. The system enforces:
 
-1. **ONLY** Indian legal system context
-2. **NO** global / US / UK / generic legal answers
-3. **NO** hallucination — only facts from trained data
-4. Structured response format (Title → Summary → Key Points → Law)
-5. Mandatory fallback when unsure
+1. **Indian legal system context first**
+2. Handles plain-language legal-help queries like cyberbullying, hacking, scams, harassment, salary, landlord, and family disputes
+3. **NO** global / US / UK / generic legal answers
+4. **NO** hallucination — only facts from trained data
+5. Structured FIRAC-style response
+6. Helpful fallback only for truly unrelated queries
 
 ---
 
