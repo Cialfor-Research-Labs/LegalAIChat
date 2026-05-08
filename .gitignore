@@ -59,3 +59,8 @@ Thumbs.db
 # Generated/manual extraction artifacts
 _manual_unzip/
 _manual_text.txt
+codepush.sh
+BNSS_2023_updated.xlsx
+BNS_2023_updated.xlsx
+BSA_2023_updated.xlsx
+.gitignore

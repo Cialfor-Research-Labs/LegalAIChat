@@ -44,7 +44,12 @@ async function requestChatResponse(
   url: string,
   query: string,
   sessionId?: string | null,
-): Promise<{ responseText: string; sessionId: string | null }> {
+): Promise<{
+  responseText: string;
+  sessionId: string | null;
+  recommendLegalNotice: boolean;
+  noticePrefill: string | null;
+}> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,15 +68,22 @@ async function requestChatResponse(
   return {
     responseText,
     sessionId: typeof data?.session_id === 'string' ? data.session_id : null,
+    recommendLegalNotice: Boolean(data?.recommend_legal_notice),
+    noticePrefill: typeof data?.notice_prefill === 'string' ? data.notice_prefill : null,
   };
 }
 
 interface ChatPageProps {
   embedded?: boolean;
   onHistoryChange?: (history: any[]) => void;
+  onGenerateLegalNotice?: (caseDetails: string) => void;
 }
 
-export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryChange }) => {
+export const ChatPage: React.FC<ChatPageProps> = ({
+  embedded = false,
+  onHistoryChange,
+  onGenerateLegalNotice,
+}) => {
   const configuredTllacApiUrl = getConfiguredTllacApiUrl();
   const hostBasedTllacApiUrl = getHostBasedTllacApiUrl();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -92,6 +104,8 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
 
     let responseText = '';
     let returnedSessionId: string | null = activeSessionId;
+    let recommendLegalNotice = false;
+    let noticePrefill: string | null = null;
 
     try {
       const candidateUrls: string[] = [];
@@ -119,6 +133,8 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
           const result = await requestChatResponse(candidateUrl, content, activeSessionId);
           responseText = result.responseText;
           returnedSessionId = result.sessionId;
+          recommendLegalNotice = result.recommendLegalNotice;
+          noticePrefill = result.noticePrefill;
           break;
         } catch (error) {
           lastError = error;
@@ -154,6 +170,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
       id: (Date.now() + 1).toString(),
       role: 'assistant',
       content: responseText,
+      legalNoticePrompt: recommendLegalNotice ? noticePrefill || content : undefined,
     };
     setMessages(prev => [...prev, botMessage]);
     setIsLoading(false);
@@ -175,6 +192,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ embedded = false, onHistoryC
         messages={messages} 
         isLoading={isLoading} 
         onSendMessage={handleSendMessage} 
+        onGenerateLegalNotice={onGenerateLegalNotice}
       />
     </>
   );

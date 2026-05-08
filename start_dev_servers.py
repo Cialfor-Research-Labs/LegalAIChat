@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import platform
 import signal
 import socket
 import subprocess
@@ -12,10 +11,10 @@ from typing import Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parent
-IS_WINDOWS = platform.system().lower() == "windows"
 
 BACKEND_PORT = 9001
 FRONTEND_PORT = 3000
+HOST = "0.0.0.0"
 
 BACKEND_OUT_LOG = REPO_ROOT / "tllac_backend.out.log"
 BACKEND_ERR_LOG = REPO_ROOT / "tllac_backend.err.log"
@@ -39,63 +38,32 @@ def _port_is_open(port: int, host: str = "127.0.0.1") -> bool:
         return sock.connect_ex((host, port)) == 0
 
 
-def _pids_on_port_windows(port: int) -> set[int]:
-    result = _run_command(["netstat", "-ano", "-p", "tcp"])
-    pids: set[int] = set()
-
-    for line in result.stdout.splitlines():
-        if "LISTENING" not in line:
-            continue
-
-        parts = line.split()
-        if len(parts) < 5:
-            continue
-
-        local_address = parts[1]
-        pid_text = parts[-1]
-
-        if not local_address.endswith(f":{port}"):
-            continue
-
-        if pid_text.isdigit():
-            pids.add(int(pid_text))
-
-    return pids
-
-
-def _pids_on_port_posix(port: int) -> set[int]:
-    pids: set[int] = set()
-
-    for command in (["lsof", "-ti", f":{port}"], ["fuser", f"{port}/tcp"]):
-        result = _run_command(command)
-        if result.returncode != 0 and not result.stdout.strip():
-            continue
-
-        for token in result.stdout.replace("\n", " ").split():
-            token = token.strip()
-            if token.isdigit():
-                pids.add(int(token))
-
-        if pids:
-            break
-
-    return pids
+def get_lan_ip() -> str:
+    """Return the best LAN IP for sharing dev URLs on the local network."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        try:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+        except OSError:
+            return socket.gethostbyname(socket.gethostname())
 
 
 def pids_on_port(port: int) -> set[int]:
-    if IS_WINDOWS:
-        return _pids_on_port_windows(port)
-    return _pids_on_port_posix(port)
+    """Return listening process IDs for a TCP port on macOS."""
+    result = _run_command(["lsof", "-ti", f"tcp:{port}"])
+    pids: set[int] = set()
+
+    if result.returncode != 0 and not result.stdout.strip():
+        return pids
+
+    for token in result.stdout.replace("\n", " ").split():
+        token = token.strip()
+        if token.isdigit():
+            pids.add(int(token))
+    return pids
 
 
 def kill_pid(pid: int) -> None:
-    if IS_WINDOWS:
-        result = _run_command(["taskkill", "/PID", str(pid), "/T", "/F"])
-        if result.returncode != 0 and "not found" not in result.stdout.lower():
-            message = (result.stdout or result.stderr).strip()
-            raise RuntimeError(f"Failed to kill PID {pid}: {message}")
-        return
-
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -150,24 +118,29 @@ def _clear_log_files(paths: Iterable[Path]) -> None:
 
 
 def _backend_command() -> list[str]:
-    python_executable = REPO_ROOT / "tllac" / "venv" / "Scripts" / "python.exe"
-    if not python_executable.exists():
-        python_executable = Path(sys.executable)
+    python_candidates = (
+        REPO_ROOT / "tllac" / ".venv" / "bin" / "python",
+        REPO_ROOT / "tllac" / "venv" / "bin" / "python",
+        REPO_ROOT / "venv" / "bin" / "python",
+        Path(sys.executable or "python3"),
+    )
+    python_executable = next((path for path in python_candidates if path.exists()), Path("python3"))
 
     return [
         str(python_executable),
         "-m",
         "uvicorn",
         "app.main:app",
-        "--reload",
+        "--host",
+        HOST,
         "--port",
         str(BACKEND_PORT),
     ]
 
 
 def _frontend_command() -> list[str]:
-    npm_executable = "npm.cmd" if IS_WINDOWS else "npm"
-    return [npm_executable, "run", "dev"]
+    vite_executable = Path("node_modules") / ".bin" / "vite"
+    return [str(vite_executable), "--port", str(FRONTEND_PORT), "--host", HOST]
 
 
 def _spawn_service(command: list[str], cwd: Path, stdout_path: Path, stderr_path: Path) -> subprocess.Popen[bytes]:
@@ -182,10 +155,7 @@ def _spawn_service(command: list[str], cwd: Path, stdout_path: Path, stderr_path
         "close_fds": True,
     }
 
-    if IS_WINDOWS:
-        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-    else:
-        popen_kwargs["start_new_session"] = True
+    popen_kwargs["start_new_session"] = True
 
     return subprocess.Popen(command, **popen_kwargs)
 
@@ -223,8 +193,13 @@ def main() -> int:
     wait_for_port_to_open(BACKEND_PORT)
     wait_for_port_to_open(FRONTEND_PORT)
 
-    print(f"Backend is running at http://127.0.0.1:{BACKEND_PORT}")
-    print(f"Frontend is running at http://127.0.0.1:{FRONTEND_PORT}")
+    lan_ip = get_lan_ip()
+
+    print(f"Backend is listening on http://{HOST}:{BACKEND_PORT}")
+    print(f"Frontend is listening on http://{HOST}:{FRONTEND_PORT}")
+    print(f"Local frontend: http://127.0.0.1:{FRONTEND_PORT}")
+    print(f"Team LAN URL: http://{lan_ip}:{FRONTEND_PORT}")
+    print(f"LAN backend URL: http://{lan_ip}:{BACKEND_PORT}")
     print(f"Backend logs: {BACKEND_OUT_LOG.name}, {BACKEND_ERR_LOG.name}")
     print(f"Frontend logs: {FRONTEND_OUT_LOG.name}, {FRONTEND_ERR_LOG.name}")
     return 0

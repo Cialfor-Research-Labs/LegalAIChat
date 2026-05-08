@@ -124,5 +124,22 @@ class DBClient:
                 if message.get("role") and message.get("content")
             ]
 
+    def get_messages(self, session_id: Optional[str], limit: Optional[int] = None) -> list[dict[str, str]]:
+        if not session_id:
+            return []
+        with self._lock:
+            store = self._read_store()
+            session = store["sessions"].get(session_id) or {}
+            messages = session.get("messages") or []
+            selected = messages[-limit:] if limit else messages
+            return [
+                {
+                    "role": str(message.get("role", "")),
+                    "content": str(message.get("content", "")),
+                }
+                for message in selected
+                if message.get("role") and message.get("content")
+            ]
+
 
 db_client = DBClient()
