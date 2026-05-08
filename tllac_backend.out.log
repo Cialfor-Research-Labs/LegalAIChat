@@ -1,12 +1,33 @@
-INFO:     127.0.0.1:53811 - "POST /chat HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59885 - "POST /chat HTTP/1.1" 200 OK
 Initializing Bedrock client...
-Using model: mistral.mistral-7b-instruct-v0:2
+Using model: mistral.mistral-large-3-675b-instruct
+Applying guardrail: 8n55vl5seswo version 1
+Retrieving context from Knowledge Base: FGFHNALLY0
+Retrieved 20 KB chunks; using 11 chunks for query: A guy was drunk driving on a learner license. He hit me from behind. I had multiple injuries. What can i do legally? BNS section 281 rash driving BNS section 12
 Sending request to Bedrock...
-Applying guardrail: 8n55vl5seswo (version 1)
 Response received!
-Response structure: ['outputs', 'amazon-bedrock-guardrailAction']
-Retrying with stronger Indian-legal framing...
+Response structure: ['choices', 'created', 'id', 'model', 'object', 'service_tier', 'usage', 'amazon-bedrock-guardrailAction']
+INFO:     127.0.0.1:64395 - "POST /chat HTTP/1.1" 200 OK
+Initializing Bedrock client...
+Using model: mistral.mistral-large-3-675b-instruct
+Applying guardrail: 8n55vl5seswo version 1
+Retrieving context from Knowledge Base: FGFHNALLY0
+Retrieved 20 KB chunks; using 11 chunks for query: A guy was drunk driving on a learner's license. He hit me from behind. I had multiple injuries. What can i do legally? BNS section 281 rash driving BNS section 
+Sending request to Bedrock...
 Response received!
-Response structure: ['outputs', 'amazon-bedrock-guardrailAction']
-INFO:     127.0.0.1:49808 - "POST /chat HTTP/1.1" 200 OK
+Response structure: ['choices', 'created', 'id', 'model', 'object', 'service_tier', 'usage', 'amazon-bedrock-guardrailAction']
+INFO:     127.0.0.1:64413 - "POST /chat HTTP/1.1" 200 OK
+Initializing Bedrock client...
+Using model: mistral.mistral-large-3-675b-instruct
+Applying guardrail: 8n55vl5seswo version 1
+Retrieving context from Knowledge Base: FGFHNALLY0
+Retrieved 20 KB chunks; using 11 chunks for query: A guy was drunk driving on a learner's license. He hit me from behind. I had multiple injuries. What can i do legally? A guy was drunk driving on a learner's li
+Sending request to Bedrock...
+Response received!
+Response structure: ['id', 'object', 'created', 'model', 'choices', 'usage', 'amazon-bedrock-guardrailAction']
+Retrying with stronger Indian legal framing...
+Retrieving context from Knowledge Base: FGFHNALLY0
+Retrieved 20 KB chunks; using 11 chunks for query: A guy was drunk driving on a learner's license. He hit me from behind. I had multiple injuries. What can i do legally? A guy was drunk driving on a learner's li
+Sending request to Bedrock...
+Response received!
+Response structure: ['id', 'object', 'created', 'model', 'choices', 'usage', 'amazon-bedrock-guardrailAction']
+INFO:     127.0.0.1:64581 - "POST /chat HTTP/1.1" 200 OK

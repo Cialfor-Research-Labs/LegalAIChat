@@ -11,6 +11,7 @@ Start with:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .routes.chat import router as chat_router
+from .routes.legal_notice import router as legal_notice_router
 
 # ──────────────────────────────────────────────
 # Application Instance
@@ -39,6 +40,7 @@ app.add_middleware(
 # Routes
 # ──────────────────────────────────────────────
 app.include_router(chat_router)
+app.include_router(legal_notice_router)
 
 
 # ──────────────────────────────────────────────
