@@ -1,12 +1,10 @@
-INFO:     Will watch for changes in these directories: ['C:\\Users\\Prerna Pandey\\LAWLLM\\tllac']
-INFO:     Uvicorn running on http://127.0.0.1:9001 (Press CTRL+C to quit)
-INFO:     Started reloader process [10084] using WatchFiles
-INFO:     Started server process [23544]
+INFO:     Started server process [25617]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:tllac.routes.chat:Incoming query: i was kicked out of my rented flat without notice by my landlord. He threw all my belongings outside
-INFO:tllac.routes.chat:Returning clarifying questions instead of full analysis.
-INFO:tllac.routes.chat:Incoming query: It happened in Pune Maharashtra. Both parties are from same city
-INFO:tllac.routes.chat:Returning clarifying questions instead of full analysis.
-INFO:tllac.routes.chat:Incoming query: how does start date and ongoing date matter in this case?
+INFO:     Uvicorn running on http://0.0.0.0:9001 (Press CTRL+C to quit)
+INFO:tllac.routes.chat:Incoming query: A guy was drunk driving on a learner license. He hit me from behind. I had multiple injuries. What can i do legally?
+INFO:tllac.routes.chat:Generated LLM-only response (5120 chars).
+INFO:tllac.routes.chat:Incoming query: A guy was drunk driving on a learner's license. He hit me from behind. I had multiple injuries. What can i do legally?
+INFO:tllac.routes.chat:Generated LLM-only response (3364 chars).
+INFO:tllac.routes.chat:Incoming query: one guy was riding a motor bike. He was drunk. He hit two people. What can we do?
 INFO:tllac.routes.chat:Generated LLM-only response (129 chars).

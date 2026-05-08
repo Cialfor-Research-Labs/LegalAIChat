@@ -295,6 +295,29 @@
     border-color: var(--app-chat-assistant-bubble-border);
     box-shadow: var(--app-chat-assistant-bubble-shadow);
   }
+
+  .typing-caret {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    margin-left: 2px;
+    vertical-align: -0.15em;
+    border-radius: 1px;
+    background: currentColor;
+    animation: typing-caret-blink 0.9s steps(2, start) infinite;
+  }
+}
+
+@keyframes typing-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  46%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .no-scrollbar::-webkit-scrollbar {

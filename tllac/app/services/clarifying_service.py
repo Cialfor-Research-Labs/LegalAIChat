@@ -206,6 +206,80 @@ _PROFILES = (
             "police, magistrate, or another authority is the right next step."
         ),
     ),
+    ClarifyingProfile(
+        name="banking_finance",
+        trigger_terms=(
+            "loan",
+            "emi",
+            "bank notice",
+            "sarfaesi",
+            "drt",
+            "cheque bounce",
+            "cheque bounced",
+            "credit card",
+            "upi fraud",
+            "bank fraud",
+        ),
+        preferred_dimensions=(
+            "money_amount",
+            "timeline",
+            "documents",
+            "bank_or_payment_mode",
+            "current_status",
+            "police_or_notice",
+            "location",
+        ),
+        why_it_matters=(
+            "These facts affect whether the route is cheque-bounce action, banking grievance, "
+            "DRT/SARFAESI response, cyber-fraud complaint, or civil recovery."
+        ),
+    ),
+    ClarifyingProfile(
+        name="constitutional_writ",
+        trigger_terms=(
+            "government inaction",
+            "police not taking",
+            "authority not",
+            "writ",
+            "fundamental right",
+            "state authority",
+        ),
+        preferred_dimensions=(
+            "location",
+            "timeline",
+            "documents",
+            "current_status",
+            "police_or_notice",
+            "remedy_sought",
+        ),
+        why_it_matters=(
+            "These facts affect whether a writ is maintainable, whether an alternative "
+            "statutory remedy exists, and what interim direction can realistically be sought."
+        ),
+    ),
+    ClarifyingProfile(
+        name="motor_accident",
+        trigger_terms=(
+            "accident",
+            "vehicle accident",
+            "rash driving",
+            "insurance claim",
+            "mact",
+        ),
+        preferred_dimensions=(
+            "location",
+            "timeline",
+            "injury_or_harm",
+            "documents",
+            "police_or_notice",
+            "money_amount",
+            "current_status",
+        ),
+        why_it_matters=(
+            "These facts affect MACT jurisdiction, insurance liability, compensation, "
+            "criminal reporting, and urgent medical or evidentiary steps."
+        ),
+    ),
 )
 
 _DIMENSION_QUESTIONS = {
@@ -228,6 +302,7 @@ _DIMENSION_QUESTIONS = {
     "violence_or_threat": "Has there been any physical violence, threat, coercion, or immediate danger?",
     "bank_or_payment_mode": "How was the payment made: UPI, card, bank transfer, wallet, cash, or something else?",
     "injury_or_harm": "Was there any physical injury, financial loss, reputational harm, or mental harassment?",
+    "remedy_sought": "What outcome do you want: FIR, compensation, injunction, refund, notice, appeal, protection, or another remedy?",
 }
 
 
@@ -327,6 +402,7 @@ _DIMENSION_CHECKS = {
     "violence_or_threat": _has_violence_or_threat_context,
     "bank_or_payment_mode": _has_bank_or_payment_mode_context,
     "injury_or_harm": _has_injury_or_harm_context,
+    "remedy_sought": lambda text: any(term in text for term in ("fir", "compensation", "injunction", "refund", "notice", "appeal", "protection", "divorce", "bail", "complaint")),
 }
 
 
@@ -356,6 +432,13 @@ def _generic_issue_like_query(text: str) -> bool:
             "divorce",
             "custody",
             "maintenance",
+            "cheque",
+            "sarfaesi",
+            "accident",
+            "insurance",
+            "government",
+            "writ",
+            "notice",
         )
     )
 
@@ -415,6 +498,8 @@ def get_clarifying_response(query: str) -> str | None:
             "relationship",
             "conduct",
             "documents",
+            "evidence",
+            "remedy_sought",
             "current_status",
         )
         missing = _missing_dimensions(text, generic_dimensions)

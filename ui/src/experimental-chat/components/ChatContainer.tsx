@@ -7,9 +7,15 @@ interface ChatContainerProps {
   messages: Message[];
   isLoading: boolean;
   onSendMessage: (content: string) => void;
+  onGenerateLegalNotice?: (caseDetails: string) => void;
 }
 
-export const ChatContainer: React.FC<ChatContainerProps> = ({ messages, isLoading, onSendMessage }) => {
+export const ChatContainer: React.FC<ChatContainerProps> = ({
+  messages,
+  isLoading,
+  onSendMessage,
+  onGenerateLegalNotice,
+}) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -55,7 +61,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ messages, isLoadin
             ) : (
               <div className="pb-4">
                 {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    onGenerateLegalNotice={onGenerateLegalNotice}
+                  />
                 ))}
                 {isLoading && (
                   <div className="flex w-full justify-start mb-6">
