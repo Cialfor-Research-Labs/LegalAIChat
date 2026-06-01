@@ -162,12 +162,7 @@ def _looks_like_scope_rejection(text: str) -> bool:
 def generate_response(
     user_question: str,
     conversation_history: list[dict[str, str]] | None = None,
-    retrieval_query: str | None = None,
-    use_knowledge_base: bool = True,
 ) -> str:
-    # Preserved for API compatibility with callers; KB retrieval is intentionally disabled.
-    _ = retrieval_query
-    _ = use_knowledge_base
     print("Initializing Bedrock client...")
 
     try:

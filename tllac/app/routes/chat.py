@@ -410,13 +410,9 @@ async def chat_endpoint(request: ChatRequest):
             f"New follow-up to answer:\n{query}\n\n"
             f"Legal analysis scaffold for this turn:\n{model_query}"
         )
-    retrieval_query = session_legal_context if full_prior_history and not is_general_explanation else query
-    if _is_motor_accident_legal_help_query(session_legal_context):
-        retrieval_query = f"{retrieval_query}\nBNS section 281 rash driving\nBNS section 125 act endangering life"
     response_text = generate_response(
         model_query,
         conversation_history=conversation_history,
-        retrieval_query=retrieval_query,
     )
     if not response_text:
         response_text = "The legal language model did not return a response."
