@@ -7,6 +7,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   legalNoticePrompt?: string;
+  animateOnMount?: boolean;
 }
 
 interface ChatMessageProps {
@@ -18,12 +19,18 @@ const typedMessageIds = new Set<string>();
 
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onGenerateLegalNotice }) => {
   const isUser = message.role === 'user';
-  const shouldAnimate = !isUser && !typedMessageIds.has(message.id);
+  const shouldAnimate = !isUser && message.animateOnMount !== false && !typedMessageIds.has(message.id);
   const [visibleContent, setVisibleContent] = useState(shouldAnimate ? '' : message.content);
   const isTyping = !isUser && visibleContent.length < message.content.length;
 
   useEffect(() => {
     if (isUser) {
+      setVisibleContent(message.content);
+      return;
+    }
+
+    if (message.animateOnMount === false) {
+      typedMessageIds.add(message.id);
       setVisibleContent(message.content);
       return;
     }
@@ -47,7 +54,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onGenerateLeg
     }, 18);
 
     return () => window.clearInterval(interval);
-  }, [isUser, message.content, message.id]);
+  }, [isUser, message.animateOnMount, message.content, message.id]);
 
   return (
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
