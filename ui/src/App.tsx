@@ -1,12 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FileText, MessageSquare } from 'lucide-react';
+import { AuthFormValue, AuthPage } from './auth/AuthPage';
 import ChatPage from './experimental-chat/ChatPage';
+import { requestWithFallback } from './experimental-chat/api';
 import { LegalNoticeDraft, LegalNoticeGenerator } from './LegalNoticeGenerator';
 
 type ActiveTab = 'chat' | 'legal-notice';
+type AuthMode = 'login' | 'register';
+
+interface AuthUser {
+  user_id: string;
+  email: string;
+  full_name: string;
+}
+
+interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}
 
 const LEGAL_NOTICE_PROXY_URL = '/tllac-api/legal-notice/generate';
 const LOCAL_LEGAL_NOTICE_URL = 'http://127.0.0.1:9001/legal-notice/generate';
+const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
 
 function getHostBasedLegalNoticeUrl(): string {
   const { protocol, hostname } = window.location;
@@ -15,7 +31,10 @@ function getHostBasedLegalNoticeUrl(): string {
   return `${resolvedProtocol}//${resolvedHostname}:9001/legal-notice/generate`;
 }
 
-async function requestLegalNotice(input: Omit<LegalNoticeDraft, 'notice'>): Promise<string> {
+async function requestLegalNotice(
+  authToken: string,
+  input: Omit<LegalNoticeDraft, 'notice'>,
+): Promise<string> {
   const candidateUrls = [
     LEGAL_NOTICE_PROXY_URL,
     getHostBasedLegalNoticeUrl(),
@@ -27,7 +46,10 @@ async function requestLegalNotice(input: Omit<LegalNoticeDraft, 'notice'>): Prom
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
         body: JSON.stringify({
           client_details: input.clientDetails,
           lawyer_details: input.lawyerDetails,
@@ -61,15 +83,101 @@ export const App: React.FC = () => {
   const [initialCaseDetails, setInitialCaseDetails] = useState('');
   const [isGeneratingNotice, setIsGeneratingNotice] = useState(false);
   const [noticeError, setNoticeError] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(
+    () => window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
+  );
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(Boolean(authToken));
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
+
+  useEffect(() => {
+    if (!authToken) {
+      setCurrentUser(null);
+      setIsAuthLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsAuthLoading(true);
+
+    void requestWithFallback<{ user: AuthUser }>('/auth/me', () => ({
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
+    }))
+      .then((data) => {
+        if (!cancelled) {
+          setCurrentUser(data.user);
+          setAuthError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAuthToken(null);
+          window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+          setCurrentUser(null);
+          setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsAuthLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken]);
+
+  const handleAuthSubmit = async (mode: AuthMode, form: AuthFormValue) => {
+    setIsSubmittingAuth(true);
+    setAuthError(null);
+    try {
+      const endpoint = mode === 'login' ? '/auth/login' : '/auth/register';
+      const payload =
+        mode === 'login'
+          ? { email: form.email, password: form.password }
+          : { full_name: form.fullName, email: form.email, password: form.password };
+      const data = await requestWithFallback<AuthResponse>(endpoint, () => ({
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      }));
+      setAuthToken(data.access_token);
+      setCurrentUser(data.user);
+      window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, data.access_token);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'Authentication failed.');
+    } finally {
+      setIsSubmittingAuth(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthToken(null);
+    setCurrentUser(null);
+    window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    setActiveTab('chat');
+  };
 
   const generateNotice = async (input: Omit<LegalNoticeDraft, 'notice'>) => {
+    if (!authToken) {
+      setNoticeError('Login required before generating a legal notice.');
+      return;
+    }
+
     setActiveTab('legal-notice');
     setInitialCaseDetails(input.caseDetails);
     setIsGeneratingNotice(true);
     setNoticeError(null);
 
     try {
-      const notice = await requestLegalNotice(input);
+      const notice = await requestLegalNotice(authToken, input);
       setNoticeDraft({ ...input, notice });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to generate legal notice.';
@@ -85,7 +193,8 @@ export const App: React.FC = () => {
       lawyerDetails: '',
       recipientDetails: '',
       caseDetails,
-      relevantInfo: 'Generated from the legal chat conversation. Fill missing client, lawyer, recipient, address, date, amount, and document details before dispatch.',
+      relevantInfo:
+        'Generated from the legal chat conversation. Fill missing client, lawyer, recipient, address, date, amount, and document details before dispatch.',
     });
   };
 
@@ -97,24 +206,55 @@ export const App: React.FC = () => {
         : 'border-transparent text-on-surface-variant hover:text-on-surface',
     ].join(' ');
 
+  if (isAuthLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface text-on-surface" data-theme="dark">
+        <div className="status-pill">Checking your secure workspace...</div>
+      </div>
+    );
+  }
+
+  if (!authToken || !currentUser) {
+    return (
+      <AuthPage
+        onSubmit={handleAuthSubmit}
+        isSubmitting={isSubmittingAuth}
+        error={authError}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface font-body text-on-surface" data-theme="dark">
       <div className="border-b border-outline-variant/20 bg-surface-container">
-        <div className="flex items-center px-4 md:px-6">
-          <button type="button" onClick={() => setActiveTab('chat')} className={tabClass('chat')}>
-            <MessageSquare size={17} />
-            Legal Chat
-          </button>
-          <button type="button" onClick={() => setActiveTab('legal-notice')} className={tabClass('legal-notice')}>
-            <FileText size={17} />
-            Legal Notice Generator
-          </button>
+        <div className="flex items-center justify-between px-4 md:px-6">
+          <div className="flex items-center">
+            <button type="button" onClick={() => setActiveTab('chat')} className={tabClass('chat')}>
+              <MessageSquare size={17} />
+              Legal Chat
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('legal-notice')}
+              className={tabClass('legal-notice')}
+            >
+              <FileText size={17} />
+              Legal Notice Generator
+            </button>
+          </div>
+          <div className="hidden text-sm text-on-surface-variant md:block">{currentUser.email}</div>
         </div>
       </div>
 
       <div className="min-h-0 flex-1">
         {activeTab === 'chat' ? (
-          <ChatPage embedded onGenerateLegalNotice={generateNoticeFromChat} />
+          <ChatPage
+            embedded
+            authToken={authToken}
+            user={currentUser}
+            onLogout={handleLogout}
+            onGenerateLegalNotice={generateNoticeFromChat}
+          />
         ) : (
           <LegalNoticeGenerator
             draft={noticeDraft}

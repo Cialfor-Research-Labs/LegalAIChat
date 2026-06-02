@@ -8,12 +8,13 @@ Response:
   { "response": "..." }
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 import logging
 import re
 
 from ..db.db_client import db_client
+from ..services.auth_service import get_current_user
 from ..services.bedrock_llm_service import generate_response
 from ..services.legal_framework import build_lawyer_ai_framework_context
 from ..services.online_legal_research import build_online_legal_research_context
@@ -53,6 +54,28 @@ class ChatResponse(BaseModel):
         default=None,
         description="Case details to prefill when generating a legal notice from chat.",
     )
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class SessionMessage(BaseModel):
+    id: str
+    role: str
+    content: str
+    timestamp: str
+
+
+class SessionDetail(BaseModel):
+    session_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    messages: list[SessionMessage]
 
 
 _GREETING_RESPONSES = {
@@ -307,7 +330,10 @@ def _latest_assistant_question_context(messages: list[dict[str, str]]) -> str:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
     """
     LLM-only chat endpoint for the new UI.
     """
@@ -317,32 +343,33 @@ async def chat_endpoint(request: ChatRequest):
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty.")
 
-    session_id = db_client.ensure_session(request.session_id, title_hint=query)
-    full_prior_history = db_client.get_messages(session_id)
-    prior_history = db_client.get_messages(session_id, limit=14)
+    user_id = current_user["user_id"]
+    session_id = db_client.ensure_session(user_id, request.session_id, title_hint=query)
+    full_prior_history = db_client.get_messages(user_id, session_id)
+    prior_history = full_prior_history[-14:]
     prior_user_messages = [
         message["content"]
         for message in full_prior_history
         if message.get("role") == "user" and message.get("content")
     ]
     combined_user_context = "\n".join([*prior_user_messages, query]).strip()
-    db_client.append_message(session_id, "user", query)
+    db_client.append_message(user_id, session_id, "user", query)
 
     greeting_response = _get_greeting_response(query)
     if greeting_response:
-        db_client.append_message(session_id, "assistant", greeting_response)
+        db_client.append_message(user_id, session_id, "assistant", greeting_response)
         return ChatResponse(response=greeting_response, session_id=session_id)
 
     if _is_illegal_bribe_facilitation_query(query):
         fallback_message = "I can help with Indian legal and legal-adjacent issues such as police complaints, cyberbullying, harassment, fraud, hacking, family disputes, contracts, property, employment, and consumer matters."
-        db_client.append_message(session_id, "assistant", fallback_message)
+        db_client.append_message(user_id, session_id, "assistant", fallback_message)
         return ChatResponse(response=fallback_message, session_id=session_id)
 
     original_legal_issue = _find_original_legal_issue(full_prior_history, query)
     session_legal_context = "\n".join([original_legal_issue, combined_user_context]).strip()
     is_valid, fallback_message = validate_query(session_legal_context)
     if not is_valid and not full_prior_history:
-        db_client.append_message(session_id, "assistant", fallback_message)
+        db_client.append_message(user_id, session_id, "assistant", fallback_message)
         return ChatResponse(response=fallback_message, session_id=session_id)
 
     is_general_explanation = _is_general_explanation_query(query)
@@ -417,7 +444,7 @@ async def chat_endpoint(request: ChatRequest):
     if not response_text:
         response_text = "The legal language model did not return a response."
 
-    db_client.append_message(session_id, "assistant", response_text)
+    db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated LLM-only response (%d chars).", len(response_text))
     recommend_legal_notice = _should_recommend_legal_notice(combined_user_context)
     notice_prefill = combined_user_context if recommend_legal_notice else None
@@ -427,3 +454,21 @@ async def chat_endpoint(request: ChatRequest):
         recommend_legal_notice=recommend_legal_notice,
         notice_prefill=notice_prefill,
     )
+
+
+@router.get("/chat/sessions")
+async def list_chat_sessions(
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    return {"sessions": db_client.list_sessions(current_user["user_id"])}
+
+
+@router.get("/chat/sessions/{session_id}", response_model=SessionDetail)
+async def get_chat_session(
+    session_id: str,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    try:
+        return SessionDetail(**db_client.get_session_messages(current_user["user_id"], session_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
