@@ -11,14 +11,20 @@ from pathlib import Path
 
 import boto3
 from botocore.exceptions import ClientError
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from ..utils.prompt_builder import get_system_prompt
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-load_dotenv(_REPO_ROOT / ".env")
+#load_dotenv(_REPO_ROOT / ".env")
 load_dotenv(_REPO_ROOT / "tllac" / ".env")
+_DOTENV_PATH = _REPO_ROOT / "tllac" / ".env"
+_DOTENV_VALUES = {
+    key: value
+    for key, value in dotenv_values(_DOTENV_PATH).items()
+    if value is not None
+}
 
 
 def _resolve_model_id() -> str:
@@ -46,32 +52,77 @@ def _resolve_guardrail_config() -> tuple[str, str] | tuple[None, None]:
     return (guardrail_id.strip(), normalized_version)
 
 
-def _build_bedrock_client(service_name: str = "bedrock-runtime"):
-    region = os.getenv("AWS_REGION") or os.getenv("BEDROCK_REGION")
-    access_key = os.getenv("AWS_ACCESS_KEY_ID")
-    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-    session_token = os.getenv("AWS_SESSION_TOKEN")
-    profile = os.getenv("AWS_PROFILE")
+def _get_setting(*names: str) -> str | None:
+    for name in names:
+        value = _DOTENV_VALUES.get(name)
+        if value and str(value).strip():
+            return str(value).strip()
 
-    client_kwargs = {}
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
 
-    if region:
-        client_kwargs["region_name"] = region
+    return None
 
-    if access_key and secret_key:
-        client_kwargs["aws_access_key_id"] = access_key
-        client_kwargs["aws_secret_access_key"] = secret_key
 
-        if session_token:
-            client_kwargs["aws_session_token"] = session_token
+def _resolve_aws_credentials() -> tuple[dict[str, str], str]:
+    region = _get_setting("AWS_REGION", "BEDROCK_REGION")
+    profile = _get_setting("AWS_PROFILE")
 
-        return boto3.client(service_name, **client_kwargs)
+    dotenv_access_key = _DOTENV_VALUES.get("AWS_ACCESS_KEY_ID")
+    dotenv_secret_key = _DOTENV_VALUES.get("AWS_SECRET_ACCESS_KEY")
+    dotenv_session_token = _DOTENV_VALUES.get("AWS_SESSION_TOKEN")
+
+    if dotenv_access_key and dotenv_secret_key:
+        credentials = {
+            "aws_access_key_id": dotenv_access_key.strip(),
+            "aws_secret_access_key": dotenv_secret_key.strip(),
+        }
+        if dotenv_session_token and dotenv_session_token.strip():
+            credentials["aws_session_token"] = dotenv_session_token.strip()
+        if region:
+            credentials["region_name"] = region
+        return credentials, "tllac/.env"
+
+    env_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    env_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    env_session_token = os.getenv("AWS_SESSION_TOKEN")
+
+    if env_access_key and env_secret_key:
+        credentials = {
+            "aws_access_key_id": env_access_key.strip(),
+            "aws_secret_access_key": env_secret_key.strip(),
+        }
+        if env_session_token and env_session_token.strip():
+            credentials["aws_session_token"] = env_session_token.strip()
+        if region:
+            credentials["region_name"] = region
+        return credentials, "environment"
 
     if profile:
-        session = boto3.session.Session(profile_name=profile, region_name=region)
-        return session.client(service_name)
+        credentials = {"profile_name": profile}
+        if region:
+            credentials["region_name"] = region
+        return credentials, "profile"
 
-    return boto3.client(service_name, **client_kwargs)
+    credentials = {}
+    if region:
+        credentials["region_name"] = region
+    return credentials, "default"
+
+
+def _build_bedrock_client(service_name: str = "bedrock-runtime"):
+    client_kwargs, credential_source = _resolve_aws_credentials()
+
+    if credential_source == "profile":
+        session = boto3.session.Session(
+            profile_name=client_kwargs["profile_name"],
+            region_name=client_kwargs.get("region_name"),
+        )
+        return session.client(service_name), credential_source
+
+    return boto3.client(service_name, **client_kwargs), credential_source
 
 
 def _build_messages(
@@ -166,11 +217,12 @@ def generate_response(
     print("Initializing Bedrock client...")
 
     try:
-        client = _build_bedrock_client()
+        client, credential_source = _build_bedrock_client()
         model_id = _resolve_model_id()
         guardrail_id, guardrail_version = _resolve_guardrail_config()
 
         print(f"Using model: {model_id}")
+        print(f"Using AWS credentials from: {credential_source}")
 
         invoke_kwargs = {
             "modelId": model_id,
@@ -218,6 +270,13 @@ def generate_response(
         return text
 
     except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code == "UnrecognizedClientException":
+            return (
+                "AWS Client Error: The active AWS credentials were rejected by Bedrock. "
+                "This service now prefers credentials from tllac/.env over machine-level AWS variables. "
+                "Verify that the key pair in tllac/.env is valid, active, and allowed to call Bedrock in the configured region."
+            )
         return f"AWS Client Error: {exc}"
 
     except Exception as exc:
