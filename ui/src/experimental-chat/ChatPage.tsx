@@ -224,7 +224,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
 
   const content = (
     <>
-      <div className="flex items-center justify-between border-b border-outline-variant/20 bg-surface-container p-4">
+      <div className="sticky top-0 z-30 shrink-0 flex items-center justify-between border-b border-outline-variant/20 bg-surface-container p-4">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -263,7 +263,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
         error={historyError}
         isOpen={isSidebarOpen}
       />
-      <div className="flex min-h-0 flex-1 flex-col">{content}</div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
     </div>
   );
 };

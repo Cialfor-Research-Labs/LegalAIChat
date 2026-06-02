@@ -226,9 +226,10 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface font-body text-on-surface" data-theme="dark">
-      <div className="border-b border-outline-variant/20 bg-surface-container">
+      <div className="sticky top-0 z-40 border-b border-outline-variant/20 bg-surface-container">
         <div className="flex items-center justify-between px-4 md:px-6">
-          <div className="flex items-center">
+          <div className="hidden text-sm text-on-surface-variant md:block">{currentUser.email}</div>
+          <div className="ml-auto flex items-center justify-end">
             <button type="button" onClick={() => setActiveTab('chat')} className={tabClass('chat')}>
               <MessageSquare size={17} />
               Legal Chat
@@ -242,7 +243,6 @@ export const App: React.FC = () => {
               Legal Notice Generator
             </button>
           </div>
-          <div className="hidden text-sm text-on-surface-variant md:block">{currentUser.email}</div>
         </div>
       </div>
 
