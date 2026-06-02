@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Download, FileText, Loader2, Wand2 } from 'lucide-react';
-import { jsPDF } from 'jspdf';
+import { ChevronDown, Download, FileText, Loader2, Wand2 } from 'lucide-react';
 
 export interface LegalNoticeDraft {
   clientDetails: string;
@@ -28,31 +27,33 @@ const emptyInput = {
   relevantInfo: '',
 };
 
-function downloadNoticePdf(notice: string) {
-  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
-  const margin = 54;
-  const maxWidth = 487;
-  const lineHeight = 15;
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  let y = margin;
+function downloadBlob(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+}
 
-  pdf.setFont('times', 'normal');
-  pdf.setFontSize(11);
+function downloadNoticeTxt(notice: string) {
+  downloadBlob('legal-notice.txt', notice, 'text/plain;charset=utf-8');
+}
 
-  notice.split('\n').forEach((paragraph) => {
-    const lines = pdf.splitTextToSize(paragraph || ' ', maxWidth);
-    lines.forEach((line: string) => {
-      if (y > pageHeight - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-      pdf.text(line, margin, y);
-      y += lineHeight;
-    });
-    y += 4;
-  });
-
-  pdf.save('legal-notice.pdf');
+function downloadNoticeDoc(notice: string) {
+  const htmlDocument = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Legal Notice</title>
+  </head>
+  <body style="font-family: Times New Roman, serif; white-space: pre-wrap;">${notice
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')}</body>
+</html>`;
+  downloadBlob('legal-notice.doc', htmlDocument, 'application/msword');
 }
 
 export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
@@ -63,6 +64,7 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
   onGenerate,
 }) => {
   const [form, setForm] = useState(emptyInput);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   useEffect(() => {
     if (initialCaseDetails) {
@@ -94,14 +96,43 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
             <h1 className="mt-1 text-xl font-semibold text-on-surface">Legal Notice Generator</h1>
           </div>
           {draft?.notice && (
-            <button
-              type="button"
-              onClick={() => downloadNoticePdf(draft.notice)}
-              className="primary-button"
-            >
-              <Download size={18} />
-              Download PDF
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsExportMenuOpen((current) => !current)}
+                className="primary-button"
+              >
+                <Download size={18} />
+                Export
+                <ChevronDown size={16} />
+              </button>
+              {isExportMenuOpen ? (
+                <div className="absolute right-0 top-full z-20 mt-2 min-w-40 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-2 shadow-ambient">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadNoticeTxt(draft.notice);
+                      setIsExportMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition hover:bg-surface-container-low"
+                  >
+                    <FileText size={16} />
+                    Export TXT
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadNoticeDoc(draft.notice);
+                      setIsExportMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition hover:bg-surface-container-low"
+                  >
+                    <FileText size={16} />
+                    Export DOC
+                  </button>
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
       </div>
