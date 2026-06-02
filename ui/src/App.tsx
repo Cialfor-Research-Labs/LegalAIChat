@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, MessageSquare } from 'lucide-react';
+import { FilePenLine, FileText, MessageSquare } from 'lucide-react';
 import { AuthFormValue, AuthPage } from './auth/AuthPage';
+import { DocumentDraft, DocumentGenerator } from './DocumentGenerator';
 import ChatPage from './experimental-chat/ChatPage';
 import { requestWithFallback } from './experimental-chat/api';
 import { LegalNoticeDraft, LegalNoticeGenerator } from './LegalNoticeGenerator';
 
-type ActiveTab = 'chat' | 'legal-notice';
+type ActiveTab = 'chat' | 'legal-notice' | 'document-generator';
 type AuthMode = 'login' | 'register';
 
 interface AuthUser {
@@ -80,9 +81,12 @@ async function requestLegalNotice(
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat');
   const [noticeDraft, setNoticeDraft] = useState<LegalNoticeDraft | null>(null);
+  const [documentDraft, setDocumentDraft] = useState<DocumentDraft | null>(null);
   const [initialCaseDetails, setInitialCaseDetails] = useState('');
   const [isGeneratingNotice, setIsGeneratingNotice] = useState(false);
+  const [isGeneratingDocument, setIsGeneratingDocument] = useState(false);
   const [noticeError, setNoticeError] = useState<string | null>(null);
+  const [documentError, setDocumentError] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(
     () => window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY),
   );
@@ -198,6 +202,42 @@ export const App: React.FC = () => {
     });
   };
 
+  const generateDocument = async (input: Omit<DocumentDraft, 'document'>) => {
+    setActiveTab('document-generator');
+    setIsGeneratingDocument(true);
+    setDocumentError(null);
+
+    try {
+      const preview = [
+        `# ${input.documentType || 'Document'} Draft`,
+        '',
+        '> Backend integration is not connected yet. This is a frontend-only scaffold preview.',
+        '',
+        '## Type of Document',
+        input.documentType || 'Select',
+        '',
+        '## Party / Client Details',
+        input.partyDetails || '[Not provided]',
+        '',
+        '## Other Party / Recipient Details',
+        input.recipientDetails || '[Not provided]',
+        '',
+        '## Core Details',
+        input.caseDetails || '[Not provided]',
+        '',
+        '## Additional Information',
+        input.relevantInfo || '[Not provided]',
+      ].join('\n');
+
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+      setDocumentDraft({ ...input, document: preview });
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : 'Unable to prepare document draft.');
+    } finally {
+      setIsGeneratingDocument(false);
+    }
+  };
+
   const tabClass = (tab: ActiveTab) =>
     [
       'inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition',
@@ -242,6 +282,14 @@ export const App: React.FC = () => {
               <FileText size={17} />
               Legal Notice Generator
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('document-generator')}
+              className={tabClass('document-generator')}
+            >
+              <FilePenLine size={17} />
+              Document Generator
+            </button>
           </div>
         </div>
       </div>
@@ -255,13 +303,20 @@ export const App: React.FC = () => {
             onLogout={handleLogout}
             onGenerateLegalNotice={generateNoticeFromChat}
           />
-        ) : (
+        ) : activeTab === 'legal-notice' ? (
           <LegalNoticeGenerator
             draft={noticeDraft}
             initialCaseDetails={initialCaseDetails}
             isGenerating={isGeneratingNotice}
             error={noticeError}
             onGenerate={generateNotice}
+          />
+        ) : (
+          <DocumentGenerator
+            draft={documentDraft}
+            isGenerating={isGeneratingDocument}
+            error={documentError}
+            onGenerate={generateDocument}
           />
         )}
       </div>
