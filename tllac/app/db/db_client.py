@@ -8,6 +8,7 @@ import base64
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import json
 import logging
 import os
 from pathlib import Path
@@ -101,6 +102,20 @@ class DBClient:
 
                     CREATE INDEX IF NOT EXISTS idx_chat_messages_session_created
                     ON chat_messages (session_id, created_at ASC);
+
+                    CREATE TABLE IF NOT EXISTS generated_artifacts (
+                        artifact_id UUID PRIMARY KEY,
+                        user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+                        artifact_type TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        encrypted_input BYTEA NOT NULL,
+                        encrypted_output BYTEA NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_generated_artifacts_user_type_updated
+                    ON generated_artifacts (user_id, artifact_type, updated_at DESC);
                     """
                 )
             conn.commit()
@@ -331,6 +346,96 @@ class DBClient:
             "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
             "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
             "messages": self.get_messages(user_id, session_id),
+        }
+
+    def save_generated_artifact(
+        self,
+        *,
+        user_id: str,
+        artifact_type: str,
+        title: str,
+        input_payload: dict[str, Any],
+        output_text: str,
+        artifact_id: str | None = None,
+    ) -> str:
+        resolved_artifact_id = artifact_id or str(uuid4())
+        encrypted_input = self._encrypt(json.dumps(input_payload))
+        encrypted_output = self._encrypt(output_text)
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO generated_artifacts (
+                        artifact_id,
+                        user_id,
+                        artifact_type,
+                        title,
+                        encrypted_input,
+                        encrypted_output,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    RETURNING artifact_id
+                    """,
+                    (
+                        resolved_artifact_id,
+                        user_id,
+                        artifact_type,
+                        title.strip()[:120] or artifact_type,
+                        encrypted_input,
+                        encrypted_output,
+                    ),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return str(row["artifact_id"])
+
+    def list_generated_artifacts(self, user_id: str, artifact_type: str) -> list[dict[str, str]]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT artifact_id, title, created_at, updated_at
+                    FROM generated_artifacts
+                    WHERE user_id = %s AND artifact_type = %s
+                    ORDER BY updated_at DESC
+                    """,
+                    (user_id, artifact_type),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "artifact_id": str(row["artifact_id"]),
+                "title": row["title"],
+                "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+                "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+            }
+            for row in rows
+        ]
+
+    def get_generated_artifact(self, user_id: str, artifact_id: str, artifact_type: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT artifact_id, title, encrypted_input, encrypted_output, created_at, updated_at
+                    FROM generated_artifacts
+                    WHERE artifact_id = %s AND user_id = %s AND artifact_type = %s
+                    """,
+                    (artifact_id, user_id, artifact_type),
+                )
+                row = cur.fetchone()
+        if not row:
+            raise ValueError("Generated item not found.")
+        return {
+            "artifact_id": str(row["artifact_id"]),
+            "title": row["title"],
+            "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+            "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+            "input_payload": json.loads(self._decrypt(bytes(row["encrypted_input"]))),
+            "output_text": self._decrypt(bytes(row["encrypted_output"])),
         }
 
 
