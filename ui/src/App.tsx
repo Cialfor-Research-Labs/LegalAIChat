@@ -26,6 +26,19 @@ interface DocumentGeneratorResponse {
   document?: string;
   draft?: string;
   content?: string;
+  history_id?: string;
+}
+
+interface LegalNoticeResponse {
+  notice?: string;
+  history_id?: string;
+}
+
+interface GeneratorHistoryItem {
+  artifact_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
 }
 
 const LEGAL_NOTICE_PROXY_URL = '/tllac-api/legal-notice/generate';
@@ -43,7 +56,7 @@ function getHostBasedLegalNoticeUrl(): string {
 async function requestLegalNotice(
   authToken: string,
   input: Omit<LegalNoticeDraft, 'notice'>,
-): Promise<string> {
+): Promise<LegalNoticeResponse> {
   const candidateUrls = [
     LEGAL_NOTICE_PROXY_URL,
     getHostBasedLegalNoticeUrl(),
@@ -77,7 +90,10 @@ async function requestLegalNotice(
       if (!notice) {
         throw new Error('Generator returned an empty notice.');
       }
-      return notice;
+      return {
+        notice,
+        history_id: typeof data?.history_id === 'string' ? data.history_id : null,
+      };
     } catch (error) {
       lastError = error;
     }
@@ -90,6 +106,10 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chat');
   const [noticeDraft, setNoticeDraft] = useState<LegalNoticeDraft | null>(null);
   const [documentDraft, setDocumentDraft] = useState<DocumentDraft | null>(null);
+  const [noticeHistory, setNoticeHistory] = useState<GeneratorHistoryItem[]>([]);
+  const [documentHistory, setDocumentHistory] = useState<GeneratorHistoryItem[]>([]);
+  const [activeNoticeHistoryId, setActiveNoticeHistoryId] = useState<string | null>(null);
+  const [activeDocumentHistoryId, setActiveDocumentHistoryId] = useState<string | null>(null);
   const [initialCaseDetails, setInitialCaseDetails] = useState('');
   const [isGeneratingNotice, setIsGeneratingNotice] = useState(false);
   const [isGeneratingDocument, setIsGeneratingDocument] = useState(false);
@@ -144,6 +164,35 @@ export const App: React.FC = () => {
     };
   }, [authToken]);
 
+  const loadNoticeHistory = async (token: string) => {
+    const data = await requestWithFallback<{ items: GeneratorHistoryItem[] }>('/legal-notice/history', () => ({
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    }));
+    setNoticeHistory(Array.isArray(data.items) ? data.items : []);
+  };
+
+  const loadDocumentHistory = async (token: string) => {
+    const data = await requestWithFallback<{ items: GeneratorHistoryItem[] }>('/document-generator/history', () => ({
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    }));
+    setDocumentHistory(Array.isArray(data.items) ? data.items : []);
+  };
+
+  useEffect(() => {
+    if (!authToken) {
+      setNoticeHistory([]);
+      setDocumentHistory([]);
+      setActiveNoticeHistoryId(null);
+      setActiveDocumentHistoryId(null);
+      return;
+    }
+
+    void loadNoticeHistory(authToken);
+    void loadDocumentHistory(authToken);
+  }, [authToken]);
+
   const handleAuthSubmit = async (mode: AuthMode, form: AuthFormValue) => {
     setIsSubmittingAuth(true);
     setAuthError(null);
@@ -177,6 +226,21 @@ export const App: React.FC = () => {
     setActiveTab('chat');
   };
 
+  const createNewNotice = () => {
+    setActiveTab('legal-notice');
+    setNoticeDraft(null);
+    setActiveNoticeHistoryId(null);
+    setInitialCaseDetails('');
+    setNoticeError(null);
+  };
+
+  const createNewDocument = () => {
+    setActiveTab('document-generator');
+    setDocumentDraft(null);
+    setActiveDocumentHistoryId(null);
+    setDocumentError(null);
+  };
+
   const generateNotice = async (input: Omit<LegalNoticeDraft, 'notice'>) => {
     if (!authToken) {
       setNoticeError('Login required before generating a legal notice.');
@@ -189,8 +253,11 @@ export const App: React.FC = () => {
     setNoticeError(null);
 
     try {
-      const notice = await requestLegalNotice(authToken, input);
+      const result = await requestLegalNotice(authToken, input);
+      const notice = typeof result.notice === 'string' ? result.notice : '';
       setNoticeDraft({ ...input, notice });
+      setActiveNoticeHistoryId(typeof result.history_id === 'string' ? result.history_id : null);
+      await loadNoticeHistory(authToken);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to generate legal notice.';
       setNoticeError(message);
@@ -271,11 +338,75 @@ export const App: React.FC = () => {
         structuredSections: input.structuredSections,
         document,
       });
+      setActiveDocumentHistoryId(typeof data.history_id === 'string' ? data.history_id : null);
+      await loadDocumentHistory(authToken);
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : 'Unable to prepare document draft.');
     } finally {
       setIsGeneratingDocument(false);
     }
+  };
+
+  const selectNoticeHistory = async (artifactId: string) => {
+    if (!authToken) {
+      return;
+    }
+
+    const data = await requestWithFallback<{
+      artifact_id: string;
+      input_payload: {
+        client_details?: string;
+        lawyer_details?: string;
+        recipient_details?: string;
+        case_details?: string;
+        relevant_info?: string;
+      };
+      output_text: string;
+    }>(`/legal-notice/history/${artifactId}`, () => ({
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }));
+
+    setActiveTab('legal-notice');
+    setActiveNoticeHistoryId(data.artifact_id);
+    setNoticeDraft({
+      clientDetails: data.input_payload.client_details || '',
+      lawyerDetails: data.input_payload.lawyer_details || '',
+      recipientDetails: data.input_payload.recipient_details || '',
+      caseDetails: data.input_payload.case_details || '',
+      relevantInfo: data.input_payload.relevant_info || '',
+      notice: data.output_text || '',
+    });
+  };
+
+  const selectDocumentHistory = async (artifactId: string) => {
+    if (!authToken) {
+      return;
+    }
+
+    const data = await requestWithFallback<{
+      artifact_id: string;
+      input_payload: {
+        document_type?: string;
+        additional_info?: string;
+        structured_fields?: Record<string, string>;
+        structured_sections?: DocumentDraft['structuredSections'];
+      };
+      output_text: string;
+    }>(`/document-generator/history/${artifactId}`, () => ({
+      method: 'GET',
+      headers: { Authorization: `Bearer ${authToken}` },
+    }));
+
+    setActiveTab('document-generator');
+    setActiveDocumentHistoryId(data.artifact_id);
+    setDocumentDraft({
+      documentType: data.input_payload.document_type || '',
+      additionalInfo: data.input_payload.additional_info || '',
+      structuredFields: data.input_payload.structured_fields || {},
+      structuredSections: data.input_payload.structured_sections || [],
+      document: data.output_text || '',
+    });
   };
 
   const tabClass = (tab: ActiveTab) =>
@@ -349,6 +480,12 @@ export const App: React.FC = () => {
             initialCaseDetails={initialCaseDetails}
             isGenerating={isGeneratingNotice}
             error={noticeError}
+            userName={currentUser.full_name}
+            onLogout={handleLogout}
+            onCreateNew={createNewNotice}
+            history={noticeHistory}
+            activeHistoryId={activeNoticeHistoryId}
+            onSelectHistory={selectNoticeHistory}
             onGenerate={generateNotice}
           />
         ) : (
@@ -356,6 +493,12 @@ export const App: React.FC = () => {
             draft={documentDraft}
             isGenerating={isGeneratingDocument}
             error={documentError}
+            userName={currentUser.full_name}
+            onLogout={handleLogout}
+            onCreateNew={createNewDocument}
+            history={documentHistory}
+            activeHistoryId={activeDocumentHistoryId}
+            onSelectHistory={selectDocumentHistory}
             onGenerate={generateDocument}
           />
         )}

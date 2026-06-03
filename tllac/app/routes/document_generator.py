@@ -7,6 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from ..db.db_client import db_client
 from ..services.auth_service import get_current_user
 from ..services.document_generator_service import generate_document
 
@@ -41,6 +42,16 @@ class DocumentGeneratorRequest(BaseModel):
 
 class DocumentGeneratorResponse(BaseModel):
     document: str
+    history_id: str
+
+
+class DocumentHistoryDetail(BaseModel):
+    artifact_id: str
+    title: str
+    created_at: str
+    updated_at: str
+    input_payload: dict
+    output_text: str
 
 
 @router.post("/generate", response_model=DocumentGeneratorResponse)
@@ -77,4 +88,32 @@ async def generate_document_endpoint(
     if not document:
         raise HTTPException(status_code=502, detail="Document generator returned an empty response.")
 
-    return DocumentGeneratorResponse(document=document)
+    history_id = db_client.save_generated_artifact(
+        user_id=current_user["user_id"],
+        artifact_type="document_generator",
+        title=request.document_type_label.strip() or request.document_type.strip(),
+        input_payload=request.model_dump(),
+        output_text=document,
+    )
+
+    return DocumentGeneratorResponse(document=document, history_id=history_id)
+
+
+@router.get("/history")
+async def list_document_history(
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    return {"items": db_client.list_generated_artifacts(current_user["user_id"], "document_generator")}
+
+
+@router.get("/history/{artifact_id}", response_model=DocumentHistoryDetail)
+async def get_document_history(
+    artifact_id: str,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    try:
+        return DocumentHistoryDetail(
+            **db_client.get_generated_artifact(current_user["user_id"], artifact_id, "document_generator")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
