@@ -324,20 +324,15 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
   return (
     <div className="relative flex h-full min-h-0 overflow-hidden bg-surface">
       {isSidebarOpen ? (
-        <button
-          type="button"
-          aria-label="Close sidebar overlay"
-          onClick={() => setIsSidebarOpen(false)}
-          className="absolute inset-0 z-30 bg-black/40 md:hidden"
-        />
-      ) : null}
+        <>
+          <button
+            type="button"
+            aria-label="Close sidebar overlay"
+            onClick={() => setIsSidebarOpen(false)}
+            className="absolute inset-0 z-30 bg-black/40 md:hidden"
+          />
 
-      <aside
-        className={[
-          'absolute inset-y-0 left-0 z-40 flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-outline-variant/20 bg-surface-container transition-transform duration-200 md:static md:z-auto',
-          isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
-        ].join(' ')}
-      >
+          <aside className="absolute inset-y-0 left-0 z-40 flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-outline-variant/20 bg-surface-container shadow-ambient md:relative md:z-0 md:shadow-none">
         <div className="shrink-0 border-b border-outline-variant/20 bg-surface-container p-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -403,7 +398,9 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
             Logout
           </button>
         </div>
-      </aside>
+          </aside>
+        </>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="sticky top-0 z-30 shrink-0 border-b border-outline-variant/20 bg-surface-container px-4 py-4 md:px-8">
