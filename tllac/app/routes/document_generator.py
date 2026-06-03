@@ -15,12 +15,25 @@ router = APIRouter(prefix="/document-generator", tags=["document-generator"])
 
 
 class DocumentGeneratorRequest(BaseModel):
+    class StructuredItem(BaseModel):
+        key: str = Field(default="", max_length=120)
+        label: str = Field(default="", max_length=200)
+        value: str = Field(default="", max_length=12000)
+
+    class StructuredSection(BaseModel):
+        key: str = Field(default="", max_length=120)
+        title: str = Field(default="", max_length=200)
+        items: list["DocumentGeneratorRequest.StructuredItem"] = Field(default_factory=list)
+
     document_type: str = Field(..., min_length=2, max_length=120)
     document_type_label: str = Field(..., min_length=2, max_length=200)
     party_details: str = Field(default="", max_length=6000)
     recipient_details: str = Field(default="", max_length=6000)
     case_details: str = Field(..., min_length=5, max_length=16000)
     relevant_info: str = Field(default="", max_length=10000)
+    additional_info: str = Field(default="", max_length=12000)
+    structured_fields: dict[str, str] = Field(default_factory=dict)
+    structured_sections: list["DocumentGeneratorRequest.StructuredSection"] = Field(default_factory=list)
     skill_name: str = Field(default="", max_length=200)
     skill_prompt: str = Field(default="", max_length=60000)
     frontend_source: str = Field(default="", max_length=100)
@@ -44,6 +57,19 @@ async def generate_document_endpoint(
         recipient_details=request.recipient_details,
         case_details=request.case_details,
         relevant_info=request.relevant_info,
+        additional_info=request.additional_info,
+        structured_fields=request.structured_fields,
+        structured_sections=[
+            {
+                "key": section.key,
+                "title": section.title,
+                "items": [
+                    {"key": item.key, "label": item.label, "value": item.value}
+                    for item in section.items
+                ],
+            }
+            for section in request.structured_sections
+        ],
         skill_name=request.skill_name,
         skill_prompt=request.skill_prompt,
     )

@@ -28,10 +28,27 @@ def build_document_generation_prompt(
     recipient_details: str = "",
     case_details: str,
     relevant_info: str = "",
+    additional_info: str = "",
+    structured_fields: dict[str, str] | None = None,
+    structured_sections: list[dict[str, object]] | None = None,
     skill_name: str = "",
     skill_prompt: str = "",
 ) -> str:
     effective_skill_prompt = _normalize_prompt(skill_prompt)
+    structured_sections = structured_sections or []
+
+    structured_text = "\n\n".join(
+        (
+            f"{str(section.get('title') or 'Section')}:\n"
+            + "\n".join(
+                f"- {str(item.get('label') or item.get('key') or 'Field')}: {str(item.get('value') or '').strip()}"
+                for item in list(section.get('items') or [])
+                if str(item.get('value') or '').strip()
+            )
+        )
+        for section in structured_sections
+        if any(str(item.get('value') or '').strip() for item in list(section.get('items') or []))
+    )
 
     return (
         f"{effective_skill_prompt}\n\n"
@@ -43,7 +60,9 @@ def build_document_generation_prompt(
         f"Party / client details:\n{party_details.strip() or '[Party details not provided]'}\n\n"
         f"Other party / recipient details:\n{recipient_details.strip() or '[Recipient details not provided]'}\n\n"
         f"Core case details:\n{case_details.strip() or '[Case details not provided]'}\n\n"
-        f"Other relevant information:\n{relevant_info.strip() or '[No additional information provided]'}"
+        f"Other relevant information:\n{relevant_info.strip() or '[No additional information provided]'}\n\n"
+        f"Additional information:\n{additional_info.strip() or '[No additional information provided]'}\n\n"
+        f"Structured document fields:\n{structured_text or '[No structured sections provided]'}"
     )
 
 
@@ -55,6 +74,9 @@ def generate_document(
     recipient_details: str = "",
     case_details: str,
     relevant_info: str = "",
+    additional_info: str = "",
+    structured_fields: dict[str, str] | None = None,
+    structured_sections: list[dict[str, object]] | None = None,
     skill_name: str = "",
     skill_prompt: str = "",
 ) -> str:
@@ -65,6 +87,9 @@ def generate_document(
         recipient_details=recipient_details,
         case_details=case_details,
         relevant_info=relevant_info,
+        additional_info=additional_info,
+        structured_fields=structured_fields,
+        structured_sections=structured_sections,
         skill_name=skill_name,
         skill_prompt=skill_prompt,
     )

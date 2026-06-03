@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FilePenLine, FileText, MessageSquare } from 'lucide-react';
 import { AuthFormValue, AuthPage } from './auth/AuthPage';
-import { DocumentDraft, DocumentGenerator } from './DocumentGenerator';
+import { DocumentDraft, DocumentGenerator, type DocumentGeneratorInput } from './DocumentGenerator';
 import { getDocumentSkillByType } from './documentSkills';
 import ChatPage from './experimental-chat/ChatPage';
 import { requestWithFallback } from './experimental-chat/api';
@@ -210,7 +210,7 @@ export const App: React.FC = () => {
     });
   };
 
-  const generateDocument = async (input: Omit<DocumentDraft, 'document'>) => {
+  const generateDocument = async (input: DocumentGeneratorInput) => {
     if (!authToken) {
       setDocumentError('Login required before generating a document.');
       return;
@@ -241,6 +241,9 @@ export const App: React.FC = () => {
             recipient_details: input.recipientDetails,
             case_details: input.caseDetails,
             relevant_info: input.relevantInfo,
+            additional_info: input.additionalInfo,
+            structured_fields: input.structuredFields,
+            structured_sections: input.structuredSections,
             skill_name: selectedSkill.skillName,
             skill_prompt: selectedSkill.skillContent,
             frontend_source: 'document-generator',
@@ -261,7 +264,13 @@ export const App: React.FC = () => {
         throw new Error('Document generator returned an empty draft.');
       }
 
-      setDocumentDraft({ ...input, document });
+      setDocumentDraft({
+        documentType: input.documentType,
+        additionalInfo: input.additionalInfo,
+        structuredFields: input.structuredFields,
+        structuredSections: input.structuredSections,
+        document,
+      });
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : 'Unable to prepare document draft.');
     } finally {
