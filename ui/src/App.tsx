@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FilePenLine, FileText, MessageSquare } from 'lucide-react';
 import { AuthFormValue, AuthPage } from './auth/AuthPage';
 import { DocumentDraft, DocumentGenerator } from './DocumentGenerator';
+import { getDocumentSkillByType } from './documentSkills';
 import ChatPage from './experimental-chat/ChatPage';
 import { requestWithFallback } from './experimental-chat/api';
 import { LegalNoticeDraft, LegalNoticeGenerator } from './LegalNoticeGenerator';
@@ -21,9 +22,16 @@ interface AuthResponse {
   user: AuthUser;
 }
 
+interface DocumentGeneratorResponse {
+  document?: string;
+  draft?: string;
+  content?: string;
+}
+
 const LEGAL_NOTICE_PROXY_URL = '/tllac-api/legal-notice/generate';
 const LOCAL_LEGAL_NOTICE_URL = 'http://127.0.0.1:9001/legal-notice/generate';
 const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
+const DOCUMENT_GENERATOR_PATH = '/document-generator/generate';
 
 function getHostBasedLegalNoticeUrl(): string {
   const { protocol, hostname } = window.location;
@@ -203,34 +211,57 @@ export const App: React.FC = () => {
   };
 
   const generateDocument = async (input: Omit<DocumentDraft, 'document'>) => {
+    if (!authToken) {
+      setDocumentError('Login required before generating a document.');
+      return;
+    }
+
     setActiveTab('document-generator');
     setIsGeneratingDocument(true);
     setDocumentError(null);
 
     try {
-      const preview = [
-        `# ${input.documentType || 'Document'} Draft`,
-        '',
-        '> Backend integration is not connected yet. This is a frontend-only scaffold preview.',
-        '',
-        '## Type of Document',
-        input.documentType || 'Select',
-        '',
-        '## Party / Client Details',
-        input.partyDetails || '[Not provided]',
-        '',
-        '## Other Party / Recipient Details',
-        input.recipientDetails || '[Not provided]',
-        '',
-        '## Core Details',
-        input.caseDetails || '[Not provided]',
-        '',
-        '## Additional Information',
-        input.relevantInfo || '[Not provided]',
-      ].join('\n');
+      const selectedSkill = getDocumentSkillByType(input.documentType);
+      if (!selectedSkill) {
+        throw new Error('Please choose a supported document type.');
+      }
 
-      await new Promise((resolve) => window.setTimeout(resolve, 250));
-      setDocumentDraft({ ...input, document: preview });
+      const data = await requestWithFallback<DocumentGeneratorResponse>(
+        DOCUMENT_GENERATOR_PATH,
+        () => ({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({
+            document_type: input.documentType,
+            document_type_label: selectedSkill.label,
+            party_details: input.partyDetails,
+            recipient_details: input.recipientDetails,
+            case_details: input.caseDetails,
+            relevant_info: input.relevantInfo,
+            skill_name: selectedSkill.skillName,
+            skill_prompt: selectedSkill.skillContent,
+            frontend_source: 'document-generator',
+          }),
+        }),
+      );
+
+      const document =
+        typeof data.document === 'string'
+          ? data.document.trim()
+          : typeof data.draft === 'string'
+            ? data.draft.trim()
+            : typeof data.content === 'string'
+              ? data.content.trim()
+              : '';
+
+      if (!document) {
+        throw new Error('Document generator returned an empty draft.');
+      }
+
+      setDocumentDraft({ ...input, document });
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : 'Unable to prepare document draft.');
     } finally {
