@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { ChevronDown, Download, FileText, Loader2, Wand2 } from 'lucide-react';
+import { DOCUMENT_SKILLS } from './documentSkills';
 
 export interface DocumentDraft {
   documentType: string;
@@ -26,6 +28,31 @@ const emptyInput = {
   relevantInfo: '',
 };
 
+function preserveDocumentLineBreaks(document: string) {
+  return document
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => {
+      if (!line.trim()) {
+        return '';
+      }
+
+      const trimmed = line.trim();
+      if (
+        trimmed === '---' ||
+        trimmed === '___' ||
+        trimmed === '***' ||
+        /^#{1,6}\s/.test(trimmed) ||
+        /^(\d+\.|[-*+])\s/.test(trimmed)
+      ) {
+        return line;
+      }
+
+      return `${line}  `;
+    })
+    .join('\n');
+}
+
 function downloadBlob(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = window.URL.createObjectURL(blob);
@@ -41,16 +68,20 @@ function downloadDocumentTxt(document: string) {
 }
 
 function downloadDocumentDoc(document: string) {
+  const previewHtml = renderToStaticMarkup(
+    <ReactMarkdown>{preserveDocumentLineBreaks(document)}</ReactMarkdown>,
+  );
   const htmlDocument = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <title>Document Draft</title>
   </head>
-  <body style="font-family: Times New Roman, serif; white-space: pre-wrap;">${document
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')}</body>
+  <body style="font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; color: #111827; margin: 36pt;">
+    <div style="white-space: pre-wrap;">
+      ${previewHtml}
+    </div>
+  </body>
 </html>`;
   downloadBlob('document-draft.doc', htmlDocument, 'application/msword');
 }
@@ -67,6 +98,10 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
   const canGenerate = useMemo(
     () => form.documentType.trim().length > 0 && form.caseDetails.trim().length >= 5 && !isGenerating,
     [form.caseDetails, form.documentType, isGenerating],
+  );
+  const previewDocument = useMemo(
+    () => (draft?.document ? preserveDocumentLineBreaks(draft.document) : ''),
+    [draft?.document],
   );
 
   const updateField = (field: keyof typeof emptyInput, value: string) => {
@@ -147,6 +182,11 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
                 required
               >
                 <option value="">Select</option>
+                {DOCUMENT_SKILLS.map((documentOption) => (
+                  <option key={documentOption.value} value={documentOption.value}>
+                    {documentOption.label}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -222,8 +262,8 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
                 <div className="text-sm">Preparing document draft...</div>
               </div>
             ) : draft?.document ? (
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-on-surface prose-p:leading-relaxed">
-                <ReactMarkdown>{draft.document}</ReactMarkdown>
+              <div className="prose prose-sm max-w-none whitespace-pre-wrap dark:prose-invert prose-headings:text-on-surface prose-p:my-0 prose-p:leading-relaxed prose-li:my-1">
+                <ReactMarkdown>{previewDocument}</ReactMarkdown>
               </div>
             ) : (
               <div className="flex h-full min-h-[420px] flex-col items-center justify-center text-center text-on-surface-variant">

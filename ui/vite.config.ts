@@ -27,6 +27,9 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       strictPort: true,
       cors: true,
+      fs: {
+        allow: [path.resolve(__dirname, '..')],
+      },
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
         '/api': {
