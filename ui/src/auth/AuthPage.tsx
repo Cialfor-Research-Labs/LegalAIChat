@@ -22,13 +22,28 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSubmit, isSubmitting, erro
     email: '',
     password: '',
   });
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
 
   const handleChange = (key: keyof AuthFormValue, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const handleModeChange = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setLocalError(null);
+    setConfirmPassword('');
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    setLocalError(null);
+
+    if (mode === 'register' && form.password !== confirmPassword) {
+      setLocalError('Passwords do not match.');
+      return;
+    }
+
     await onSubmit(mode, form);
   };
 
@@ -56,7 +71,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSubmit, isSubmitting, erro
             <div className="mb-6 flex rounded-2xl border border-outline-variant/70 bg-surface-container-low p-1">
               <button
                 type="button"
-                onClick={() => setMode('login')}
+                onClick={() => handleModeChange('login')}
                 className={[
                   'flex-1 rounded-xl px-4 py-3 text-sm font-semibold transition',
                   mode === 'login'
@@ -68,7 +83,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSubmit, isSubmitting, erro
               </button>
               <button
                 type="button"
-                onClick={() => setMode('register')}
+                onClick={() => handleModeChange('register')}
                 className={[
                   'flex-1 rounded-xl px-4 py-3 text-sm font-semibold transition',
                   mode === 'register'
@@ -121,9 +136,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onSubmit, isSubmitting, erro
                 />
               </div>
 
-              {error ? (
+              {mode === 'register' && (
+                <div>
+                  <label className="field-label">Re-enter password</label>
+                  <input
+                    type="password"
+                    className="text-field"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Re-enter your password"
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
+              )}
+
+              {localError || error ? (
                 <div className="rounded-2xl border border-error/40 bg-error/10 px-4 py-3 text-sm text-error">
-                  {error}
+                  {localError || error}
                 </div>
               ) : null}
 
