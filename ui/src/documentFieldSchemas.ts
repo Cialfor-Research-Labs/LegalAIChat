@@ -315,7 +315,8 @@ export const propertyAgreementFieldGroups: DocumentFieldGroup[] = [
   financeGroup(
     number('rent_amount', 'Rent / Lease Amount', 'Monthly or periodic rent', true),
     number('security_deposit', 'Security Deposit', 'Security deposit amount'),
-    text('term', 'Term', 'Lease / rent period', true),
+    date('start_date', 'Start Date', true),
+    date('end_date', 'End Date', true),
   ),
 ];
 
@@ -361,7 +362,8 @@ export const servicesAgreementFieldGroups: DocumentFieldGroup[] = [
   ),
   matterGroup(
     textarea('scope_of_services', 'Scope of Services', 'Services / deliverables', true, 5),
-    text('term', 'Term', 'Contract term'),
+    date('start_date', 'Start Date', true),
+    date('end_date', 'End Date', true),
     text('deliverable_timeline', 'Timeline / Milestones', 'Delivery schedule'),
   ),
   financeGroup(

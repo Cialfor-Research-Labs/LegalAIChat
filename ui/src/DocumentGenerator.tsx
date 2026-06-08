@@ -60,6 +60,82 @@ const emptyInput = {
   structuredFields: {} as Record<string, string>,
 };
 
+interface ContractTermInfo {
+  value: string;
+  error: string | null;
+}
+
+function parseDateInput(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    Number.isNaN(parsedDate.getTime()) ||
+    parsedDate.getUTCFullYear() !== year ||
+    parsedDate.getUTCMonth() !== month - 1 ||
+    parsedDate.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return { year, month, day, date: parsedDate };
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function calculateContractTerm(startDateValue: string, endDateValue: string): ContractTermInfo {
+  if (!startDateValue || !endDateValue) {
+    return { value: '', error: null };
+  }
+
+  const start = parseDateInput(startDateValue);
+  const end = parseDateInput(endDateValue);
+
+  if (!start || !end) {
+    return { value: '', error: 'Enter valid contract start and end dates.' };
+  }
+
+  if (end.date.getTime() < start.date.getTime()) {
+    return { value: '', error: 'End date must be on or after start date.' };
+  }
+
+  let years = end.year - start.year;
+  let months = end.month - start.month;
+  let days = end.day - start.day;
+
+  if (days < 0) {
+    months -= 1;
+    const previousMonth = end.month === 1 ? 12 : end.month - 1;
+    const previousMonthYear = previousMonth === 12 ? end.year - 1 : end.year;
+    days += getDaysInMonth(previousMonthYear, previousMonth);
+  }
+
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  const parts = [
+    years > 0 ? `${years} year${years === 1 ? '' : 's'}` : '',
+    months > 0 ? `${months} month${months === 1 ? '' : 's'}` : '',
+    days > 0 ? `${days} day${days === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+
+  return {
+    value: parts.length > 0 ? parts.join(', ') : '0 days',
+    error: null,
+  };
+}
+
 function preserveDocumentLineBreaks(document: string) {
   return document
     .replace(/\r\n/g, '\n')
@@ -127,13 +203,35 @@ function buildStructuredSections(
     .map((group) => ({
       key: group.key,
       title: group.title,
-      items: group.fields
-        .map((field) => ({
+      items: (() => {
+        const items = group.fields
+          .map((field) => ({
           key: field.key,
           label: field.label,
           value: (structuredFields[field.key] || '').trim(),
         }))
-        .filter((item) => item.value),
+          .filter((item) => item.value);
+
+        const contractTerm = calculateContractTerm(
+          structuredFields.start_date || '',
+          structuredFields.end_date || '',
+        );
+
+        if (
+          !contractTerm.error &&
+          contractTerm.value &&
+          group.fields.some((field) => field.key === 'start_date') &&
+          group.fields.some((field) => field.key === 'end_date')
+        ) {
+          items.push({
+            key: 'term',
+            label: 'Term',
+            value: contractTerm.value,
+          });
+        }
+
+        return items;
+      })(),
     }))
     .filter((group) => group.items.length > 0);
 
@@ -245,6 +343,10 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
   });
 
   const selectedSkill = useMemo(() => getDocumentSkillByType(form.documentType), [form.documentType]);
+  const contractTerm = useMemo(
+    () => calculateContractTerm(form.structuredFields.start_date || '', form.structuredFields.end_date || ''),
+    [form.structuredFields.end_date, form.structuredFields.start_date],
+  );
   const previewDocument = useMemo(
     () => (draft?.document ? preserveDocumentLineBreaks(draft.document) : ''),
     [draft?.document],
@@ -285,7 +387,11 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
     );
   }, [form.structuredFields, selectedSkill]);
 
-  const canGenerate = Boolean(selectedSkill) && missingRequiredFields.length === 0 && !isGenerating;
+  const canGenerate =
+    Boolean(selectedSkill) &&
+    missingRequiredFields.length === 0 &&
+    !contractTerm.error &&
+    !isGenerating;
 
   const updateField = (field: 'documentType' | 'additionalInfo', value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -304,9 +410,14 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
       return;
     }
 
+    const normalizedStructuredFields = {
+      ...form.structuredFields,
+      ...(contractTerm.value ? { term: contractTerm.value } : {}),
+    };
+
     const structuredSections = buildStructuredSections(
       selectedSkill.fieldGroups,
-      form.structuredFields,
+      normalizedStructuredFields,
       form.additionalInfo,
     );
     const sectionMap = new Map(structuredSections.map((section) => [section.key, section]));
@@ -315,7 +426,7 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
     await onGenerate({
       documentType: form.documentType,
       additionalInfo: form.additionalInfo,
-      structuredFields: form.structuredFields,
+      structuredFields: normalizedStructuredFields,
       structuredSections,
       ...legacyPayload,
     });
@@ -494,6 +605,18 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
                         {renderField(field, form.structuredFields[field.key] || '', updateStructuredField)}
                       </div>
                     ))}
+                    {group.fields.some((field) => field.key === 'start_date') &&
+                    group.fields.some((field) => field.key === 'end_date') ? (
+                      contractTerm.error ? (
+                        <div className="rounded-lg border border-error/30 bg-error-container/40 px-3 py-2 text-sm text-on-error-container">
+                          {contractTerm.error}
+                        </div>
+                      ) : contractTerm.value ? (
+                        <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm text-on-surface-variant">
+                          Calculated term: <span className="text-on-surface">{contractTerm.value}</span>
+                        </div>
+                      ) : null
+                    ) : null}
                   </div>
                 ))}
 
