@@ -5,7 +5,7 @@
 tllac/.env
 sample*.py
 sample (*.py
-
+.env.example
 # Python
 __pycache__/
 *.py[cod]

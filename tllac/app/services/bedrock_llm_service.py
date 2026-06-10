@@ -6,6 +6,7 @@ Supports Mistral Large 3 chat/messages format on Amazon Bedrock.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from dotenv import dotenv_values, load_dotenv
 from ..utils.prompt_builder import get_system_prompt
 
 
+logger = logging.getLogger("tllac.services.bedrock")
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 #load_dotenv(_REPO_ROOT / ".env")
 load_dotenv(_REPO_ROOT / "tllac" / ".env")
@@ -214,15 +216,12 @@ def generate_response(
     user_question: str,
     conversation_history: list[dict[str, str]] | None = None,
 ) -> str:
-    print("Initializing Bedrock client...")
-
     try:
-        client, credential_source = _build_bedrock_client()
+        client, _credential_source = _build_bedrock_client()
         model_id = _resolve_model_id()
         guardrail_id, guardrail_version = _resolve_guardrail_config()
 
-        print(f"Using model: {model_id}")
-        print(f"Using AWS credentials from: {credential_source}")
+        logger.info("Preparing Bedrock request for model '%s'.", model_id)
 
         invoke_kwargs = {
             "modelId": model_id,
@@ -232,7 +231,7 @@ def generate_response(
         }
 
         if guardrail_id and guardrail_version:
-            print(f"Applying guardrail: {guardrail_id} version {guardrail_version}")
+            logger.info("Applying configured Bedrock guardrail.")
             invoke_kwargs["guardrailIdentifier"] = guardrail_id
             invoke_kwargs["guardrailVersion"] = guardrail_version
 
@@ -243,20 +242,16 @@ def generate_response(
                 conversation_history,
             )
 
-            print("Sending request to Bedrock...")
             response = client.invoke_model(**current_kwargs)
-
-            print("Response received!")
             response_body = json.loads(response["body"].read())
-
-            print(f"Response structure: {list(response_body.keys())}")
+            logger.info("Received Bedrock response payload.")
 
             return _extract_text(response_body) or json.dumps(response_body, indent=2)
 
         text = invoke_once(user_question)
 
         if _looks_like_scope_rejection(text):
-            print("Retrying with stronger Indian legal framing...")
+            logger.info("Retrying Bedrock request with stronger Indian legal framing.")
 
             retry_question = (
                 "This is an Indian legal-help request. "
@@ -271,13 +266,14 @@ def generate_response(
 
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
+        logger.exception("Bedrock client error during response generation.")
         if error_code == "UnrecognizedClientException":
             return (
-                "AWS Client Error: The active AWS credentials were rejected by Bedrock. "
-                "This service now prefers credentials from tllac/.env over machine-level AWS variables. "
-                "Verify that the key pair in tllac/.env is valid, active, and allowed to call Bedrock in the configured region."
+                "The legal language model could not authenticate with the configured AI provider. "
+                "Check the Bedrock credentials and region in the environment configuration."
             )
-        return f"AWS Client Error: {exc}"
+        return "The legal language model is temporarily unavailable due to an upstream service error."
 
     except Exception as exc:
-        return f"Error: {exc}"
+        logger.exception("Unexpected error during Bedrock response generation.")
+        return "The legal language model is temporarily unavailable. Please try again."
