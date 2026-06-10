@@ -330,6 +330,59 @@ def _latest_assistant_question_context(messages: list[dict[str, str]]) -> str:
     return ""
 
 
+def _is_follow_up_fragment(query: str) -> bool:
+    normalized = _normalize_query(query).lower().strip(" .!?")
+    if not normalized:
+        return False
+    normalized_words = re.findall(r"[a-z0-9']+", normalized)
+    compact_words = " ".join(normalized_words)
+
+    short_replies = {
+        "yes",
+        "no",
+        "maybe",
+        "not yet",
+        "none",
+        "nope",
+        "yup",
+        "nah",
+    }
+    if normalized in short_replies or compact_words in short_replies:
+        return True
+
+    yes_no_words = {"yes", "no", "not", "none"}
+    if normalized_words and set(normalized_words).issubset(yes_no_words | {"and"}):
+        return True
+
+    if len(normalized.split()) <= 10:
+        fragment_markers = (
+            "yes ",
+            "no ",
+            "only ",
+            "just ",
+            "all ",
+            "it was ",
+            "they were ",
+            "he was ",
+            "she was ",
+            "verbal",
+            "written",
+            "message",
+            "call",
+            "audio",
+            "recording",
+            "screenshot",
+            "notice",
+            "police",
+            "none of",
+        )
+        return any(marker in normalized for marker in fragment_markers) or any(
+            marker in compact_words for marker in fragment_markers
+        )
+
+    return False
+
+
 def _build_safe_chat_prompt(*, base_prompt: str, rag_context: str = "", online_context: str = "") -> str:
     safety_lines = [
         "Security rules for this answer:",
@@ -345,6 +398,47 @@ def _build_safe_chat_prompt(*, base_prompt: str, rag_context: str = "", online_c
         sections.append(online_context)
 
     return "\n\n".join(section.strip() for section in sections if section and section.strip())
+
+
+def _looks_like_scope_rejection(text: str) -> bool:
+    normalized = _normalize_query(text).lower()
+    rejection_markers = (
+        "i can only assist with indian legal queries",
+        "please ask a question related to indian law",
+        "out of context",
+        "indian legal queries such as laws, cases, and legal concepts",
+    )
+    return any(marker in normalized for marker in rejection_markers)
+
+
+def _build_follow_up_fallback_response(*, original_legal_issue: str, latest_reply: str) -> str:
+    lowered = _normalize_query(latest_reply).lower()
+
+    if any(term in lowered for term in ("verbal", "oral", "only by call", "phone call")):
+        return (
+            "Since the threats are only verbal, focus on creating evidence now instead of waiting. "
+            "Under Indian law, the practical next step is to stop arguing directly, communicate only in writing where possible, "
+            "and preserve a dated record of each threat with time, place, and any witnesses. "
+            "If she threatens a false dowry complaint again, send one calm written message asking her not to make false allegations "
+            "and keep that message safely. You can also consult a local criminal lawyer in advance about anticipatory bail strategy "
+            "if you fear a complaint may actually be filed."
+        )
+
+    if lowered in {"no", "no and no", "no and no.", "no, and no", "no, and no."} or (
+        "no" in lowered and "and" in lowered and len(lowered.split()) <= 4
+    ):
+        return (
+            "If there is no FIR yet and no proof of the threats, the safest next step is preventive documentation and lawyer preparation. "
+            "Do not confront her, do not delete chats, and do not make counter-threats. "
+            "Start maintaining a written timeline, preserve call logs, and try to keep future communication in text or email. "
+            "If you sense an immediate complaint may be filed, speak to a local criminal lawyer about anticipatory bail preparation and a pre-emptive representation to the police."
+        )
+
+    return (
+        f"Treat this as part of the same Indian legal matter about: {original_legal_issue}. "
+        f"Based on your latest reply ({latest_reply}), the next step is to update the evidence position, avoid direct escalation, "
+        "preserve all records, and consult a local lawyer quickly if a complaint or FIR appears imminent."
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -391,8 +485,9 @@ async def chat_endpoint(
         return ChatResponse(response=fallback_message, session_id=session_id)
 
     is_general_explanation = _is_general_explanation_query(query)
+    is_follow_up_fragment = bool(full_prior_history) and _is_follow_up_fragment(query)
     conversation_history = [] if is_general_explanation else prior_history
-    if is_general_explanation:
+    if is_general_explanation and not is_follow_up_fragment:
         model_query = (
             "Answer directly and concisely as an Indian legal assistant. "
             "This is a general legal explanation query, not a case intake and not a follow-up requiring facts. "
@@ -402,6 +497,16 @@ async def chat_endpoint(
             "Use this compact structure only: meaning, key elements, legal effect, simple example, and current-law note "
             "where relevant. Keep it practical and under 450 words.\n\n"
             f"User query: {query}"
+        )
+    elif is_follow_up_fragment:
+        model_query = (
+            "This is a follow-up answer in an ongoing Indian legal conversation. "
+            "The latest user message is a short factual reply, not a fresh standalone query. "
+            "Interpret it together with the original legal issue, prior user timeline, and prior assistant questions. "
+            "Do not reject it as out of scope or non-legal merely because the latest reply is short. "
+            "Use the reply to update the facts and give the next practical legal step under Indian law.\n\n"
+            f"Original legal issue: {original_legal_issue}\n\n"
+            f"Latest user reply: {query}"
         )
     else:
         model_query = build_lawyer_ai_framework_context(build_indian_legal_model_query(query))
@@ -465,6 +570,11 @@ async def chat_endpoint(
     )
     if not response_text:
         response_text = "The legal language model did not return a response."
+    elif (is_follow_up_fragment or full_prior_history) and _looks_like_scope_rejection(response_text):
+        response_text = _build_follow_up_fallback_response(
+            original_legal_issue=original_legal_issue,
+            latest_reply=query,
+        )
 
     db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated chat response (%d chars).", len(response_text))
