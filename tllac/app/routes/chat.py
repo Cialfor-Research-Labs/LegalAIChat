@@ -330,6 +330,51 @@ def _latest_assistant_question_context(messages: list[dict[str, str]]) -> str:
     return ""
 
 
+def _is_follow_up_fragment(query: str) -> bool:
+    normalized = _normalize_query(query).lower().strip(" .!?")
+    if not normalized:
+        return False
+
+    short_replies = {
+        "yes",
+        "no",
+        "maybe",
+        "not yet",
+        "none",
+        "nope",
+        "yup",
+        "nah",
+    }
+    if normalized in short_replies:
+        return True
+
+    if len(normalized.split()) <= 10:
+        fragment_markers = (
+            "yes ",
+            "no ",
+            "only ",
+            "just ",
+            "all ",
+            "it was ",
+            "they were ",
+            "he was ",
+            "she was ",
+            "verbal",
+            "written",
+            "message",
+            "call",
+            "audio",
+            "recording",
+            "screenshot",
+            "notice",
+            "police",
+            "none of",
+        )
+        return any(marker in normalized for marker in fragment_markers)
+
+    return False
+
+
 def _build_safe_chat_prompt(*, base_prompt: str, rag_context: str = "", online_context: str = "") -> str:
     safety_lines = [
         "Security rules for this answer:",
@@ -391,8 +436,9 @@ async def chat_endpoint(
         return ChatResponse(response=fallback_message, session_id=session_id)
 
     is_general_explanation = _is_general_explanation_query(query)
+    is_follow_up_fragment = bool(full_prior_history) and _is_follow_up_fragment(query)
     conversation_history = [] if is_general_explanation else prior_history
-    if is_general_explanation:
+    if is_general_explanation and not is_follow_up_fragment:
         model_query = (
             "Answer directly and concisely as an Indian legal assistant. "
             "This is a general legal explanation query, not a case intake and not a follow-up requiring facts. "
@@ -402,6 +448,16 @@ async def chat_endpoint(
             "Use this compact structure only: meaning, key elements, legal effect, simple example, and current-law note "
             "where relevant. Keep it practical and under 450 words.\n\n"
             f"User query: {query}"
+        )
+    elif is_follow_up_fragment:
+        model_query = (
+            "This is a follow-up answer in an ongoing Indian legal conversation. "
+            "The latest user message is a short factual reply, not a fresh standalone query. "
+            "Interpret it together with the original legal issue, prior user timeline, and prior assistant questions. "
+            "Do not reject it as out of scope or non-legal merely because the latest reply is short. "
+            "Use the reply to update the facts and give the next practical legal step under Indian law.\n\n"
+            f"Original legal issue: {original_legal_issue}\n\n"
+            f"Latest user reply: {query}"
         )
     else:
         model_query = build_lawyer_ai_framework_context(build_indian_legal_model_query(query))
