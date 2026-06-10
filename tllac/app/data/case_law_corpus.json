@@ -1,0 +1,92 @@
+[
+  {
+    "topic_key": "motor-accident-negligence",
+    "title": "N.K.V. Bros. (P) Ltd. v. M. Karumai Ammal",
+    "court": "Supreme Court of India",
+    "year": 1980,
+    "holding": "Motor accident compensation proceedings should adopt a practical approach and not defeat genuine claims through technicalities where negligence and loss are reasonably established.",
+    "keywords": ["motor accident", "compensation", "negligence", "claim", "mact", "injury"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "motor-accident-compensation",
+    "title": "Sarla Verma v. Delhi Transport Corporation",
+    "court": "Supreme Court of India",
+    "year": 2009,
+    "holding": "The Court standardized the multiplier approach and key compensation principles for fatal and injury motor accident claims.",
+    "keywords": ["motor accident", "compensation", "multiplier", "dependency", "mact"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "arrest-bail-liberty",
+    "title": "Arnesh Kumar v. State of Bihar",
+    "court": "Supreme Court of India",
+    "year": 2014,
+    "holding": "Arrest is not automatic for offences punishable up to seven years; police must justify necessity and comply with statutory safeguards.",
+    "keywords": ["arrest", "bail", "police", "investigation", "notice of appearance", "liberty"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "bail-personal-liberty",
+    "title": "Satender Kumar Antil v. CBI",
+    "court": "Supreme Court of India",
+    "year": 2022,
+    "holding": "Bail jurisprudence must protect personal liberty and reduce unnecessary incarceration, especially where arrest was not required during investigation.",
+    "keywords": ["bail", "personal liberty", "criminal procedure", "custody", "arrest"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "consumer-deficiency-service",
+    "title": "Lucknow Development Authority v. M.K. Gupta",
+    "court": "Supreme Court of India",
+    "year": 1994,
+    "holding": "Public authorities and service providers can be liable for deficiency in service under consumer law where consumers suffer loss or harassment.",
+    "keywords": ["consumer", "deficiency in service", "compensation", "public authority", "refund"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "medical-consumer-services",
+    "title": "Indian Medical Association v. V.P. Shantha",
+    "court": "Supreme Court of India",
+    "year": 1995,
+    "holding": "Medical services fall within consumer protection law in many situations, allowing patients to seek redress for deficient service.",
+    "keywords": ["consumer", "medical negligence", "service", "compensation", "hospital"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "contract-damages",
+    "title": "Kailash Nath Associates v. Delhi Development Authority",
+    "court": "Supreme Court of India",
+    "year": 2015,
+    "holding": "Compensation clauses are subject to reasonableness and actual legal injury; statutory damages principles cannot be applied mechanically.",
+    "keywords": ["contract", "damages", "breach", "forfeiture", "section 74"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "contract-specific-performance",
+    "title": "K.S. Vidyanadam v. Vairavan",
+    "court": "Supreme Court of India",
+    "year": 1997,
+    "holding": "Specific performance is discretionary and delay or inequitable conduct can affect relief even where a contract exists.",
+    "keywords": ["contract", "specific performance", "delay", "equity", "sale agreement"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "property-title-transfer",
+    "title": "Suraj Lamp & Industries Pvt. Ltd. v. State of Haryana",
+    "court": "Supreme Court of India",
+    "year": 2012,
+    "holding": "GPA sales and similar informal arrangements do not by themselves convey legal title to immovable property.",
+    "keywords": ["property", "title", "gpa sale", "transfer", "registration"],
+    "authority_level": "supreme_court"
+  },
+  {
+    "topic_key": "constitutional-privacy",
+    "title": "K.S. Puttaswamy v. Union of India",
+    "court": "Supreme Court of India",
+    "year": 2017,
+    "holding": "Privacy is a fundamental right and state or institutional action affecting privacy must satisfy constitutional standards.",
+    "keywords": ["privacy", "fundamental rights", "constitutional law", "data", "article 21"],
+    "authority_level": "supreme_court"
+  }
+]
