@@ -338,6 +338,42 @@
   font-weight: 700;
 }
 
+.chat-markdown-table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+  border: 1px solid color-mix(in oklab, var(--app-color-outline-variant) 100%, transparent);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--app-color-surface-container-low) 85%, transparent);
+}
+
+.chat-markdown table {
+  width: 100%;
+  min-width: 540px;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.chat-markdown thead {
+  background: color-mix(in oklab, var(--app-color-primary) 14%, var(--app-color-surface-container-low));
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid color-mix(in oklab, var(--app-color-outline-variant) 100%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown th {
+  font-weight: 700;
+  color: var(--app-color-on-surface);
+}
+
+.chat-markdown tbody tr:nth-child(even) {
+  background: color-mix(in oklab, var(--app-color-surface-container-high) 55%, transparent);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
 }
