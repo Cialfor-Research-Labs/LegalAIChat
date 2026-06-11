@@ -434,10 +434,24 @@ def _build_follow_up_fallback_response(*, original_legal_issue: str, latest_repl
             "If you sense an immediate complaint may be filed, speak to a local criminal lawyer about anticipatory bail preparation and a pre-emptive representation to the police."
         )
 
+    if any(term in lowered for term in ("whatsapp", "message", "text", "screenshot", "chat")):
+        return (
+            "Those messages are useful evidence, so preserve them carefully. "
+            "Take screenshots showing the date, time, and sender details, export the chat if possible, and keep a backup on email or cloud storage. "
+            "Do not argue aggressively on WhatsApp or send threats in return. "
+            "If there is still no FIR, the practical next step is to organize the message evidence, keep a short timeline of events, and speak to a local lawyer about anticipatory bail strategy only if a complaint appears likely."
+        )
+
+    if any(term in lowered for term in ("prior case", "no prior case", "no prior cases", "no previous case")):
+        return (
+            "If there are no prior complaints or cases, that generally helps your position, but you should still preserve all current evidence and avoid escalation. "
+            "Keep records of messages, calls, and witnesses, and avoid any confrontation that could later be misrepresented. "
+            "If she makes a formal complaint, contact a local lawyer quickly for anticipatory bail and response strategy."
+        )
+
     return (
-        f"Treat this as part of the same Indian legal matter about: {original_legal_issue}. "
-        f"Based on your latest reply ({latest_reply}), the next step is to update the evidence position, avoid direct escalation, "
-        "preserve all records, and consult a local lawyer quickly if a complaint or FIR appears imminent."
+        "Based on what you just shared, the safest next step is to preserve all records, avoid direct escalation, and keep future communication calm and documented. "
+        "If a complaint or FIR appears likely, speak to a local criminal lawyer quickly so you are ready with evidence and anticipatory bail strategy if needed."
     )
 
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { FileText, User, Bot } from 'lucide-react';
 
 export interface Message {
@@ -17,11 +18,106 @@ interface ChatMessageProps {
 
 const typedMessageIds = new Set<string>();
 
+function isTableLikeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.includes('|')) {
+    return false;
+  }
+  const cellCount = trimmed.split('|').filter((part) => part.trim().length > 0).length;
+  return cellCount >= 2;
+}
+
+function isSeparatorLikeLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const withoutPipes = trimmed.replace(/\|/g, '').trim();
+  return withoutPipes.length > 0 && /^[-:\s]+$/.test(withoutPipes);
+}
+
+function toCells(row: string): string[] {
+  return row
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+    .filter((cell) => cell.length > 0);
+}
+
+function formatMarkdownRow(cells: string[]): string {
+  return `| ${cells.join(' | ')} |`;
+}
+
+function rebuildMalformedTableBlock(block: string): string {
+  if (!block.includes('|')) {
+    return block;
+  }
+
+  const flattened = block
+    .replace(/\r/g, '')
+    .replace(/:\s+\|/g, ':\n|')
+    .replace(/\s*\|\|\s*/g, '\n|')
+    .replace(/\|\s+(?=\|)/g, '|\n|');
+
+  const rawLines = flattened
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const tableLines = rawLines.filter((line) => isTableLikeLine(line) || isSeparatorLikeLine(line));
+  if (tableLines.length < 2) {
+    return block;
+  }
+
+  const headerCells = toCells(tableLines[0]);
+  if (headerCells.length < 2) {
+    return block;
+  }
+
+  const columnCount = headerCells.length;
+  const normalizedRows: string[] = [
+    formatMarkdownRow(headerCells),
+    formatMarkdownRow(Array.from({ length: columnCount }, () => '---')),
+  ];
+
+  for (const line of tableLines.slice(1)) {
+    if (isSeparatorLikeLine(line)) {
+      continue;
+    }
+
+    const cells = toCells(line);
+    if (cells.length === 0) {
+      continue;
+    }
+    if (cells.length !== columnCount) {
+      continue;
+    }
+
+    normalizedRows.push(formatMarkdownRow(cells));
+  }
+
+  return normalizedRows.length >= 3 ? normalizedRows.join('\n') : block;
+}
+
+function normalizeMarkdownTables(content: string): string {
+  if (!content.includes('|')) {
+    return content;
+  }
+
+  const blocks = content.split(/\n\s*\n/);
+  return blocks
+    .map((block) => rebuildMalformedTableBlock(block))
+    .join('\n\n');
+}
+
 export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onGenerateLegalNotice }) => {
   const isUser = message.role === 'user';
   const shouldAnimate = !isUser && message.animateOnMount !== false && !typedMessageIds.has(message.id);
   const [visibleContent, setVisibleContent] = useState(shouldAnimate ? '' : message.content);
   const isTyping = !isUser && visibleContent.length < message.content.length;
+  const markdownContent = normalizeMarkdownTables(visibleContent);
 
   useEffect(() => {
     if (isUser) {
@@ -76,8 +172,19 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onGenerateLeg
             {isUser ? (
               <div className="whitespace-pre-wrap">{message.content}</div>
             ) : (
-              <div className="prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-surface-container prose-pre:border prose-pre:border-outline-variant/30 max-w-none">
-                <ReactMarkdown>{visibleContent}</ReactMarkdown>
+              <div className="chat-markdown prose prose-sm dark:prose-invert prose-p:leading-relaxed prose-pre:bg-surface-container prose-pre:border prose-pre:border-outline-variant/30 max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    table: ({ children }) => (
+                      <div className="chat-markdown-table-wrap">
+                        <table>{children}</table>
+                      </div>
+                    ),
+                  }}
+                >
+                  {markdownContent}
+                </ReactMarkdown>
                 {isTyping && (
                   <span className="typing-caret" aria-hidden="true" />
                 )}
