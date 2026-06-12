@@ -17,7 +17,7 @@ from ..db.db_client import db_client
 from ..services.auth_service import get_current_user
 from ..services.bedrock_llm_service import generate_response
 from ..services.legal_framework import build_lawyer_ai_framework_context
-from ..services.legal_rag_service import build_legal_rag_context
+from ..services.legal_rag_service import build_legal_rag_context, build_legal_rag_source_note
 from ..services.online_legal_research import build_online_legal_research_context
 from ..services.validation_service import (
     build_indian_legal_model_query,
@@ -411,6 +411,11 @@ def _looks_like_scope_rejection(text: str) -> bool:
     return any(marker in normalized for marker in rejection_markers)
 
 
+def _should_append_source_note(text: str) -> bool:
+    normalized = _normalize_query(text).lower()
+    return any(marker in normalized for marker in (" section ", "section ", "bns", "bnss", "bsa"))
+
+
 def _build_follow_up_fallback_response(*, original_legal_issue: str, latest_reply: str) -> str:
     lowered = _normalize_query(latest_reply).lower()
 
@@ -589,6 +594,12 @@ async def chat_endpoint(
             original_legal_issue=original_legal_issue,
             latest_reply=query,
         )
+
+    source_note = ""
+    if _should_append_source_note(response_text):
+        source_note = build_legal_rag_source_note(session_legal_context)
+    if source_note:
+        response_text = f"{response_text.rstrip()}\n\n{source_note}"
 
     db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated chat response (%d chars).", len(response_text))

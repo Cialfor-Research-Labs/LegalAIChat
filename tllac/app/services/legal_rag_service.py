@@ -42,6 +42,7 @@ class RetrievedAuthority:
     reference: str
     summary: str
     score: float
+    source_file: str
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -300,6 +301,7 @@ class _LegalRagIndex:
                     reference=str(item.get("section") or "").strip() or str(item.get("section_number") or "").strip(),
                     summary=_truncate_text(" ".join(part for part in summary_parts if part).strip(), 320),
                     score=score,
+                    source_file="tllac/app/data/statute_sections.json",
                     ),
                 )
             )
@@ -357,6 +359,7 @@ class _LegalRagIndex:
                     reference=f"{str(item.get('court') or '').strip()} ({str(item.get('year') or '').strip()})".strip(),
                     summary=_truncate_text(str(item.get("holding") or "").strip(), 220),
                     score=score,
+                    source_file="tllac/app/data/case_law_corpus.json",
                 )
             )
 
@@ -413,3 +416,22 @@ def build_legal_rag_context(query: str) -> str:
         current_length = projected
 
     return "\n".join(trimmed_lines).strip()
+
+
+def build_legal_rag_source_note(query: str) -> str:
+    if not legal_rag_enabled():
+        return ""
+
+    statute_matches, case_matches = _INDEX.retrieve(query)
+    if not statute_matches and not case_matches:
+        return ""
+
+    lines = ["Source Check:"]
+
+    for item in statute_matches:
+        lines.append(f"- {item.title} - {item.reference} -> {item.source_file}")
+
+    for item in case_matches:
+        lines.append(f"- {item.title} - {item.reference} -> {item.source_file}")
+
+    return "\n".join(lines)
