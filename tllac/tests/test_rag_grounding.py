@@ -132,6 +132,31 @@ class GroundingSanitizerTests(unittest.TestCase):
         self.assertNotIn("Section 125", sanitized)
         self.assertIn("exact current statutory provision should be verified", sanitized)
 
+    def test_sanitizer_allows_sections_found_in_retrieved_statute_text(self) -> None:
+        rag_result = LegalRagResult(
+            query="Which provision covers contracts that cannot be specifically enforced?",
+            statute_matches=(
+                RetrievedAuthority(
+                    authority_type="statute",
+                    title="The Specific Relief Act, 1963",
+                    reference="Chunk law-1-c1",
+                    summary="Section 14 identifies contracts which cannot be specifically enforced.",
+                    score=8.0,
+                    source_file="json_law_files/specific-relief.json [law-1-c1]",
+                ),
+            ),
+            case_matches=(),
+        )
+
+        sanitized = sanitize_grounded_response(
+            "Section 14 addresses contracts that cannot be specifically enforced.",
+            current_query=rag_result.query,
+            rag_result=rag_result,
+        )
+
+        self.assertIn("Section 14", sanitized)
+        self.assertNotIn("exact current statutory provision should be verified", sanitized)
+
     def test_sanitizer_removes_old_placeholder_phrase(self) -> None:
         sanitized = sanitize_grounded_response(
             "Risk of false accusation under the relevant section of the applicable statute (equivalent to IPC 498A).",
