@@ -130,11 +130,13 @@ def _build_bedrock_client(service_name: str = "bedrock-runtime"):
 def _build_messages(
     user_question: str,
     conversation_history: list[dict[str, str]] | None = None,
+    system_prompt_override: str | None = None,
 ) -> list[dict[str, str]]:
+    system_content = system_prompt_override.strip() if system_prompt_override else get_system_prompt().strip()
     messages: list[dict[str, str]] = [
         {
             "role": "system",
-            "content": get_system_prompt().strip(),
+            "content": system_content,
         }
     ]
 
@@ -163,10 +165,11 @@ def _build_messages(
 def _build_request_body(
     user_question: str,
     conversation_history: list[dict[str, str]] | None = None,
+    system_prompt_override: str | None = None,
 ) -> str:
     return json.dumps(
         {
-            "messages": _build_messages(user_question, conversation_history),
+            "messages": _build_messages(user_question, conversation_history, system_prompt_override),
             "max_tokens": int(os.getenv("MAX_TOKENS", "4000")),
             "temperature": float(os.getenv("TEMPERATURE", "0.7")),
             "top_p": float(os.getenv("TOP_P", "0.9")),
@@ -276,4 +279,53 @@ def generate_response(
 
     except Exception as exc:
         logger.exception("Unexpected error during Bedrock response generation.")
+        return "The legal language model is temporarily unavailable. Please try again."
+
+
+def generate_notice_response(
+    user_question: str,
+    system_prompt: str,
+) -> str:
+    """Generate a response using a custom system prompt (used for notice drafting).
+
+    Unlike ``generate_response``, this function replaces the default Lawyer AI
+    system prompt with the caller-supplied *system_prompt* so the model receives
+    clean, uncontradicted instructions for notice generation.
+    """
+    try:
+        client, _credential_source = _build_bedrock_client()
+        model_id = _resolve_model_id()
+        guardrail_id, guardrail_version = _resolve_guardrail_config()
+
+        logger.info("Preparing Bedrock notice request for model '%s'.", model_id)
+
+        invoke_kwargs = {
+            "modelId": model_id,
+            "contentType": "application/json",
+            "accept": "application/json",
+        }
+
+        if guardrail_id and guardrail_version:
+            invoke_kwargs["guardrailIdentifier"] = guardrail_id
+            invoke_kwargs["guardrailVersion"] = guardrail_version
+
+        body = _build_request_body(user_question, None, system_prompt)
+        response = client.invoke_model(**invoke_kwargs, body=body)
+        response_body = json.loads(response["body"].read())
+        logger.info("Received Bedrock notice response payload.")
+
+        return _extract_text(response_body) or json.dumps(response_body, indent=2)
+
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        logger.exception("Bedrock client error during notice generation.")
+        if error_code == "UnrecognizedClientException":
+            return (
+                "The legal language model could not authenticate with the configured AI provider. "
+                "Check the Bedrock credentials and region in the environment configuration."
+            )
+        return "The legal language model is temporarily unavailable due to an upstream service error."
+
+    except Exception as exc:
+        logger.exception("Unexpected error during Bedrock notice generation.")
         return "The legal language model is temporarily unavailable. Please try again."

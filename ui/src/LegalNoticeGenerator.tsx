@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { BookOpen, ChevronDown, Download, FileText, Loader2, LogOut, PanelLeft, Plus, Shield, Wand2, X } from 'lucide-react';
 
 export interface LegalNoticeDraft {
@@ -52,18 +51,72 @@ function downloadNoticeTxt(notice: string) {
   downloadBlob('legal-notice.txt', notice, 'text/plain;charset=utf-8');
 }
 
+/**
+ * Convert plain-text legal notice to a Word-compatible HTML document.
+ *
+ * Word interprets HTML files saved as .doc. We use proper <p> elements so
+ * each paragraph becomes a distinct Word paragraph with correct indentation
+ * and spacing — unlike white-space:pre-wrap which Word ignores in .doc mode.
+ */
 function downloadNoticeDoc(notice: string) {
-  const htmlDocument = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Legal Notice</title>
-  </head>
-  <body style="font-family: Times New Roman, serif; white-space: pre-wrap;">${notice
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')}</body>
+  const escapeHtml = (str: string) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  // Split on blank lines to identify paragraph groups, then split further on
+  // single newlines within a group and join with <br> so the internal line
+  // breaks inside a block (like the address lines) are preserved.
+  const paragraphs = notice
+    .split(/\n{2,}/)
+    .map((block) => {
+      const lines = block
+        .split('\n')
+        .map((line) => escapeHtml(line.trimEnd()));
+      return `<p>${lines.join('<br>')}</p>`;
+    })
+    .join('\n');
+
+  const htmlDocument = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8"/>
+  <title>Legal Notice</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    @page {
+      size: A4;
+      margin: 2.54cm 2.54cm 2.54cm 2.54cm;
+    }
+    body {
+      font-family: "Times New Roman", Times, serif;
+      font-size: 12pt;
+      line-height: 1.6;
+      color: #000000;
+    }
+    p {
+      margin: 0 0 10pt 0;
+      text-align: justify;
+    }
+  </style>
+</head>
+<body>
+${paragraphs}
+</body>
 </html>`;
+
   downloadBlob('legal-notice.doc', htmlDocument, 'application/msword');
 }
 
@@ -352,8 +405,8 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
                 <div className="text-sm">Drafting legal notice...</div>
               </div>
             ) : draft?.notice ? (
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-on-surface prose-p:leading-relaxed">
-                <ReactMarkdown>{draft.notice}</ReactMarkdown>
+              <div className="font-serif text-sm leading-relaxed text-on-surface" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {draft.notice}
               </div>
             ) : (
               <div className="flex h-full min-h-[420px] flex-col items-center justify-center text-center text-on-surface-variant">
