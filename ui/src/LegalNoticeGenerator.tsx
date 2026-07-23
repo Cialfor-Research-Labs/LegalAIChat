@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Download, FileText, Loader2, Wand2 } from 'lucide-react';
-import { jsPDF } from 'jspdf';
+import { BookOpen, ChevronDown, Download, FileText, Loader2, LogOut, PanelLeft, Plus, Shield, Wand2, X } from 'lucide-react';
 
 export interface LegalNoticeDraft {
   clientDetails: string;
@@ -17,6 +16,17 @@ interface LegalNoticeGeneratorProps {
   initialCaseDetails?: string;
   isGenerating?: boolean;
   error?: string | null;
+  userName: string;
+  onLogout: () => void;
+  onCreateNew: () => void;
+  history?: Array<{
+    artifact_id: string;
+    title: string;
+    created_at: string;
+    updated_at: string;
+  }>;
+  activeHistoryId?: string | null;
+  onSelectHistory?: (artifactId: string) => void;
   onGenerate: (input: Omit<LegalNoticeDraft, 'notice'>) => Promise<void>;
 }
 
@@ -28,31 +38,33 @@ const emptyInput = {
   relevantInfo: '',
 };
 
-function downloadNoticePdf(notice: string) {
-  const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
-  const margin = 54;
-  const maxWidth = 487;
-  const lineHeight = 15;
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  let y = margin;
+function downloadBlob(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.URL.revokeObjectURL(url);
+}
 
-  pdf.setFont('times', 'normal');
-  pdf.setFontSize(11);
+function downloadNoticeTxt(notice: string) {
+  downloadBlob('legal-notice.txt', notice, 'text/plain;charset=utf-8');
+}
 
-  notice.split('\n').forEach((paragraph) => {
-    const lines = pdf.splitTextToSize(paragraph || ' ', maxWidth);
-    lines.forEach((line: string) => {
-      if (y > pageHeight - margin) {
-        pdf.addPage();
-        y = margin;
-      }
-      pdf.text(line, margin, y);
-      y += lineHeight;
-    });
-    y += 4;
-  });
-
-  pdf.save('legal-notice.pdf');
+function downloadNoticeDoc(notice: string) {
+  const htmlDocument = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Legal Notice</title>
+  </head>
+  <body style="font-family: Times New Roman, serif; white-space: pre-wrap;">${notice
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')}</body>
+</html>`;
+  downloadBlob('legal-notice.doc', htmlDocument, 'application/msword');
 }
 
 export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
@@ -60,15 +72,42 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
   initialCaseDetails,
   isGenerating = false,
   error,
+  userName,
+  onLogout,
+  onCreateNew,
+  history = [],
+  activeHistoryId = null,
+  onSelectHistory,
   onGenerate,
 }) => {
   const [form, setForm] = useState(emptyInput);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') {
+      return true;
+    }
+    return window.innerWidth >= 768;
+  });
 
   useEffect(() => {
     if (initialCaseDetails) {
       setForm((current) => ({ ...current, caseDetails: initialCaseDetails }));
     }
   }, [initialCaseDetails]);
+
+  useEffect(() => {
+    if (!draft) {
+      setForm(emptyInput);
+      return;
+    }
+    setForm({
+      clientDetails: draft.clientDetails,
+      lawyerDetails: draft.lawyerDetails,
+      recipientDetails: draft.recipientDetails,
+      caseDetails: draft.caseDetails,
+      relevantInfo: draft.relevantInfo,
+    });
+  }, [draft]);
 
   const canGenerate = useMemo(() => form.caseDetails.trim().length >= 5 && !isGenerating, [
     form.caseDetails,
@@ -86,22 +125,141 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col bg-surface">
-      <div className="border-b border-outline-variant/20 bg-surface-container px-4 py-4 md:px-8">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-          <div>
-            <div className="section-kicker">LEGAL DRAFTING</div>
-            <h1 className="mt-1 text-xl font-semibold text-on-surface">Legal Notice Generator</h1>
-          </div>
-          {draft?.notice && (
+    <div className="relative flex h-full min-h-0 overflow-hidden bg-surface">
+      {isSidebarOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close sidebar overlay"
+            onClick={() => setIsSidebarOpen(false)}
+            className="absolute inset-0 z-30 bg-black/40 md:hidden"
+          />
+
+          <aside className="absolute inset-y-0 left-0 z-40 flex h-full w-72 shrink-0 flex-col overflow-hidden border-r border-outline-variant/20 bg-surface-container shadow-ambient md:relative md:z-0 md:shadow-none">
+        <div className="shrink-0 border-b border-outline-variant/20 bg-surface-container p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-on-primary">
+                <BookOpen size={18} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-on-surface">LAW LLM Workspace</div>
+                <div className="text-xs text-on-surface-variant">{userName}</div>
+              </div>
+            </div>
             <button
               type="button"
-              onClick={() => downloadNoticePdf(draft.notice)}
-              className="primary-button"
+              aria-label="Close sidebar"
+              onClick={() => setIsSidebarOpen(false)}
+              className="flex h-9 w-9 items-center justify-center rounded-2xl border border-outline-variant/40 bg-surface-container-low text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
             >
-              <Download size={18} />
-              Download PDF
+              <X size={16} />
             </button>
+          </div>
+
+          <button type="button" onClick={onCreateNew} className="primary-button w-full justify-center">
+            <Plus size={16} />
+            New Notice
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="mb-3 flex items-center gap-2 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
+            <Shield size={13} />
+            Notice History
+          </div>
+          <div className="space-y-2">
+            {history.map((item) => (
+              <button
+                key={item.artifact_id}
+                type="button"
+                onClick={() => onSelectHistory?.(item.artifact_id)}
+                className={[
+                  'w-full rounded-2xl border px-3 py-3 text-left transition',
+                  item.artifact_id === activeHistoryId
+                    ? 'border-primary/35 bg-primary/10 text-on-surface'
+                    : 'border-outline-variant/30 bg-surface-container-low hover:border-primary/20 hover:bg-surface-container-high',
+                ].join(' ')}
+              >
+                <div className="truncate text-sm font-medium">{item.title}</div>
+                <div className="text-xs text-on-surface-variant">
+                  Updated {new Date(item.updated_at).toLocaleDateString()}
+                </div>
+              </button>
+            ))}
+            {history.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-outline-variant/40 bg-surface-container-low px-4 py-5 text-sm text-on-surface-variant">
+                No saved notices yet.
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t border-outline-variant/20 bg-surface-container p-3">
+          <button type="button" onClick={onLogout} className="neutral-button w-full justify-center">
+            <LogOut size={16} />
+            Logout
+          </button>
+        </div>
+          </aside>
+        </>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="sticky top-0 z-30 shrink-0 border-b border-outline-variant/20 bg-surface-container px-4 py-4 md:px-8">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Open sidebar'}
+              onClick={() => setIsSidebarOpen((current) => !current)}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-outline-variant/40 bg-surface-container-low text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
+            >
+              <PanelLeft size={18} />
+            </button>
+            <div>
+              <div className="section-kicker">LEGAL DRAFTING</div>
+              <h1 className="mt-1 text-xl font-semibold text-on-surface">Legal Notice Generator</h1>
+            </div>
+          </div>
+          {draft?.notice && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsExportMenuOpen((current) => !current)}
+                className="primary-button"
+              >
+                <Download size={18} />
+                Export
+                <ChevronDown size={16} />
+              </button>
+              {isExportMenuOpen ? (
+                <div className="absolute right-0 top-full z-20 mt-2 min-w-40 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-2 shadow-ambient">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadNoticeTxt(draft.notice);
+                      setIsExportMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition hover:bg-surface-container-low"
+                  >
+                    <FileText size={16} />
+                    Export TXT
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadNoticeDoc(draft.notice);
+                      setIsExportMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition hover:bg-surface-container-low"
+                  >
+                    <FileText size={16} />
+                    Export DOC
+                  </button>
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
       </div>
@@ -210,6 +368,7 @@ export const LegalNoticeGenerator: React.FC<LegalNoticeGeneratorProps> = ({
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ import { TypingIndicator } from './TypingIndicator';
 interface ChatContainerProps {
   messages: Message[];
   isLoading: boolean;
+  isSessionLoading?: boolean;
   onSendMessage: (content: string) => void;
   onGenerateLegalNotice?: (caseDetails: string) => void;
 }
@@ -13,13 +14,21 @@ interface ChatContainerProps {
 export const ChatContainer: React.FC<ChatContainerProps> = ({
   messages,
   isLoading,
+  isSessionLoading = false,
   onSendMessage,
   onGenerateLegalNotice,
 }) => {
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    });
   }, [messages, isLoading]);
 
   const suggestedPrompts = [
@@ -30,11 +39,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-surface">
-      <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
+    <div className="flex min-h-0 flex-1 flex-col bg-surface">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8">
         <div className="max-w-4xl mx-auto flex flex-col min-h-full justify-between">
           <div>
-            {messages.length === 0 ? (
+            {messages.length === 0 && !isSessionLoading ? (
               <div className="flex flex-col items-center justify-center pt-20 pb-10 text-center">
                 <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-6">
                   <span className="text-3xl">✨</span>
@@ -60,6 +69,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
               </div>
             ) : (
               <div className="pb-4">
+                {isSessionLoading && messages.length === 0 ? (
+                  <div className="flex items-center justify-center py-14 text-sm text-on-surface-variant">
+                    Opening saved chat...
+                  </div>
+                ) : null}
                 {messages.map((message) => (
                   <ChatMessage
                     key={message.id}
@@ -84,11 +98,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 )}
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
         </div>
       </div>
-      <ChatInput onSend={onSendMessage} disabled={isLoading} />
+      <div className="shrink-0">
+        <ChatInput onSend={onSendMessage} disabled={isLoading} />
+      </div>
     </div>
   );
 };

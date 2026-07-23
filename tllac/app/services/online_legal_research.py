@@ -21,7 +21,6 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger("tllac.services.online_legal_research")
 
-INDIA_KANOON_SEARCH_URL = "https://indiankanoon.org/search/?formInput={query}"
 DEFAULT_TIMEOUT_SECONDS = 6
 DEFAULT_MAX_RESULTS = 4
 
@@ -86,12 +85,16 @@ def _clean_text(text: str) -> str:
 
 
 def _online_research_enabled() -> bool:
-    return os.getenv("ONLINE_LEGAL_RESEARCH_ENABLED", "true").strip().lower() not in {
+    return os.getenv("ONLINE_LEGAL_RESEARCH_ENABLED", "false").strip().lower() not in {
         "0",
         "false",
         "no",
         "off",
     }
+
+
+def _search_url_template() -> str:
+    return os.getenv("INDIA_KANOON_SEARCH_URL", "").strip()
 
 
 def _fetch_url(url: str, timeout_seconds: int) -> str:
@@ -111,9 +114,12 @@ def search_indiakanoon(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> li
     compact_query = _clean_text(query)
     if not compact_query:
         return []
+    search_template = _search_url_template()
+    if not search_template:
+        return []
 
     timeout_seconds = int(os.getenv("ONLINE_LEGAL_RESEARCH_TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS)))
-    search_url = INDIA_KANOON_SEARCH_URL.format(query=quote_plus(compact_query))
+    search_url = search_template.format(query=quote_plus(compact_query))
 
     try:
         html = _fetch_url(search_url, timeout_seconds=timeout_seconds)

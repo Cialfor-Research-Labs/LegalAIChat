@@ -1,153 +1,89 @@
-# TLLAC — Trained Legal AI Chat Backend
+# TLLAC - Trained Legal AI Chat Backend
 
-> **Fully isolated** backend for the Experimental Chat UI.
-> Runs on **port 9001** — does NOT interfere with the existing LAW LLM backend.
+Isolated FastAPI backend for the experimental legal chat UI on port `9001`.
 
----
+## Quick Start
 
-## 📁 Folder Structure
+1. Create and activate a virtual environment.
+2. Install dependencies with `pip install -r requirements.txt`.
+3. Configure `tllac/.env` using `tllac/.env.example` as the template. Keep real credentials only in `tllac/.env`.
 
-```
-tllac/
- ├── app/
- │    ├── main.py                    # FastAPI application entry point
- │    ├── routes/
- │    │    └── chat.py               # POST /chat endpoint
- │    ├── services/
- │    │    ├── llm_service.py        # Response generation (template-based)
- │    │    └── validation_service.py # Indian legal context + data validation
- │    ├── data/
- │    │    └── trained_data.json     # Structured Indian legal knowledge base
- │    ├── db/
- │    │    └── db_client.py          # Read-only DB client (placeholder)
- │    └── utils/
- │         └── prompt_builder.py     # System prompt (strict Indian law rules)
- ├── requirements.txt
- └── README.md
+```env
+DATABASE_URL=postgresql://user:password@host:5432/legalaichat
+APP_SECRET_KEY=replace-with-a-long-random-secret
+CHAT_ENCRYPTION_KEY=replace-with-a-fernet-key
+AWS_REGION=your-aws-region
+MODEL_ID=your-bedrock-model-id
+LEGAL_RAG_ENABLED=true
+LEGAL_RAG_MAX_STATUTES=3
+LEGAL_RAG_MAX_CASES=2
+LEGAL_RAG_MAX_CHARS=1800
+LEGAL_RAG_CORPUS_ROOT=..
+LEGAL_RAG_INDEX_PATH=app/data/legal_corpus.sqlite3
+ONLINE_LEGAL_RESEARCH_ENABLED=false
 ```
 
----
-
-## 🚀 Quick Start
-
-### 1. Create a virtual environment
+Generate the encryption key with:
 
 ```bash
-cd tllac
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS / Linux
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-### 2. Install dependencies
+4. Run the backend with `uvicorn app.main:app --reload --port 9001`.
 
-```bash
-pip install -r requirements.txt
-```
+## Auth and Chat APIs
 
-### 3. Run the backend
+- `POST /auth/register` creates a user and returns a bearer token.
+- `POST /auth/login` authenticates an existing user.
+- `GET /auth/me` returns the current user for a bearer token.
+- `POST /chat` sends a chat message for the authenticated user.
+- `GET /chat/sessions` lists the user's saved sessions.
+- `GET /chat/sessions/{session_id}` returns one decrypted session.
 
-```bash
-uvicorn app.main:app --reload --port 9001
-```
+Example chat request:
 
-The server will start at `http://localhost:9001`.
-
-- **API Docs**: http://localhost:9001/docs
-- **Health Check**: http://localhost:9001/
-
----
-
-## 🔗 API Contract
-
-### `POST /chat`
-
-**Request:**
 ```json
 {
-  "query": "What is adverse possession in India?"
+  "query": "What is adverse possession in India?",
+  "session_id": null
 }
 ```
 
-**Response:**
-```json
-{
-  "response": "🔎 Adverse Possession (India)\n\n**Summary:**\n..."
-}
+## Storage Model
+
+- Users, chat sessions, and encrypted messages are stored in Postgres.
+- Chat message bodies are encrypted before persistence.
+- Session titles update from the first user prompt and are shown in the sidebar.
+
+## Frontend Notes
+
+The UI now expects login and registration before chat access. It uses the same backend base URL for:
+
+- `/auth/register`
+- `/auth/login`
+- `/auth/me`
+- `/chat`
+- `/chat/sessions`
+
+## Health
+
+- Docs: `http://localhost:9001/docs`
+- Health check: `http://localhost:9001/`
+
+## Chat Retrieval
+
+- Chat RAG is local-first and uses bundled statute data, a curated case-law corpus, and an optional indexed JSON corpus.
+- Retrieval is deterministic and local; the compact curated data stays in memory while the large corpus is queried from its generated index. It does not add a second LLM call.
+- Sensitive runtime values must stay in `tllac/.env` and should never be committed.
+
+### Building the JSON corpus index
+
+The raw `json_judgements`, `json_judgements_files`, and `json_law_files` directories are intentionally not committed because they total several gigabytes. Place them under `LEGAL_RAG_CORPUS_ROOT`, then run this from the `tllac` directory:
+
+```bash
+python -m app.scripts.build_legal_rag_index
 ```
 
-### Fallback Responses
+Use `--corpus-root` or `--output` to override the configured locations. The builder streams each JSON array, skips invalid records with warnings, deduplicates by `chunk_id`, and atomically replaces the generated SQLite index only after a successful build. Re-run it whenever the source corpus changes.
 
-| Condition | Response |
-|-----------|----------|
-| Query not related to Indian law | `"I can help with Indian legal and legal-adjacent issues such as police complaints, cyberbullying, harassment, fraud, hacking, family disputes, contracts, property, employment, and consumer matters."` |
-| No matching trained data found | `"This is not in my trained data"` |
-
----
-
-## 🧠 System Prompt (Strict)
-
-Located in `app/utils/prompt_builder.py`. The system enforces:
-
-1. **Indian legal system context first**
-2. Handles plain-language legal-help queries like cyberbullying, hacking, scams, harassment, salary, landlord, and family disputes
-3. **NO** global / US / UK / generic legal answers
-4. **NO** hallucination — only facts from trained data
-5. Structured FIRAC-style response
-6. Helpful fallback only for truly unrelated queries
-
----
-
-## 🔐 Isolation Rules
-
-| Rule | Status |
-|------|--------|
-| No imports from existing LAW LLM modules | ✅ |
-| No `legal_engine`, `legal_pipeline`, `retrieval_api` | ✅ |
-| No `rag_embeddings` or any shared backend code | ✅ |
-| No external API calls | ✅ |
-| No live web search | ✅ |
-| Independent virtual environment | ✅ |
-| Runs on separate port (9001) | ✅ |
-
----
-
-## 📊 Trained Data Topics
-
-The `trained_data.json` file contains structured knowledge on:
-
-| # | Topic | Primary Law |
-|---|-------|-------------|
-| 1 | Adverse Possession | Limitation Act, 1963 |
-| 2 | Contract Law | Indian Contract Act, 1872 |
-| 3 | AI Regulations | DPDP Act, IT Act |
-| 4 | Property Disputes | Transfer of Property Act, 1882 |
-| 5 | Fundamental Rights | Constitution of India, Part III |
-| 6 | IPC Offences | IPC, 1860 / BNS, 2023 |
-| 7 | Bail Provisions | CrPC, 1973 / BNSS, 2023 |
-| 8 | Consumer Protection | Consumer Protection Act, 2019 |
-| 9 | Divorce Law | Hindu Marriage Act, 1955 + others |
-| 10 | Right to Information | RTI Act, 2005 |
-| 11 | GST | Central GST Act, 2017 |
-| 12 | Cyber Crime | IT Act, 2000 |
-| 13 | Labour Law | Four Labour Codes (2019–2020) |
-| 14 | Writ Jurisdiction | Constitution Articles 32, 226 |
-| 15 | Motor Accident Claims | Motor Vehicles Act, 1988 |
-
----
-
-## 🔗 Frontend Integration
-
-The experimental chat UI must call **only**:
-
-```
-POST http://localhost:9001/chat
-```
-
-❌ Must NOT call any existing LAW LLM backend endpoints.
-
----
-
-## 📝 License
-
-Internal project — Cialfor Research Labs.
+The application never builds the index during startup. If the index is missing or incompatible, chat continues using the bundled curated corpus and logs a warning. Request-time retrieval reads only the generated index and never scans the raw JSON directories.

@@ -4,3 +4,7 @@ pydantic==2.6.3
 python-dotenv==1.0.1
 boto3
 botocore[crt]
+cryptography
+email-validator
+psycopg[binary]
+ijson

@@ -1,0 +1,260 @@
+name: Test, Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: legalai-production
+  cancel-in-progress: false
+
+jobs:
+  test-build-deploy:
+    name: Test, build and deploy to EC2
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      # ----------------------------------
+      # Checkout
+      # ----------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------------
+      # Backend tests
+      # ----------------------------------
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: tllac/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tllac/requirements.txt
+
+      - name: Run backend tests
+        run: |
+          python -m unittest discover \
+            -s tllac/tests \
+            -p "test_*.py" \
+            -v
+
+      # ----------------------------------
+      # Frontend tests and build
+      # ----------------------------------
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ui
+        run: npm ci --include=optional
+
+      - name: Type-check frontend
+        working-directory: ui
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: ui
+        env:
+          VITE_TLLAC_API_URL: /tllac-api
+        run: npm run build
+
+      # ----------------------------------
+      # Create deployment package
+      # ----------------------------------
+
+      - name: Create deployment artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release/ui
+
+          cp -a tllac release/tllac
+          cp -a ui/dist release/ui/dist
+
+          # Server-managed files must never be deployed from Git.
+          rm -f release/tllac/.env
+          rm -rf release/tllac/.venv
+          rm -f release/tllac/app/data/legal_corpus.sqlite3
+
+          tar \
+            -C release \
+            -czf "legalai-${GITHUB_SHA}.tar.gz" \
+            .
+
+          test -s "legalai-${GITHUB_SHA}.tar.gz"
+
+      # ----------------------------------
+      # Upload package to EC2
+      # ----------------------------------
+
+      - name: Upload deployment artifact to EC2
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          fingerprint: ${{ secrets.EC2_FINGERPRINT }}
+          port: ${{ secrets.EC2_PORT }}
+          source: "legalai-${{ github.sha }}.tar.gz"
+          target: "/home/ubuntu/legalai-deploy"
+          overwrite: true
+          timeout: 120s
+          command_timeout: 10m
+
+      # ----------------------------------
+      # Deploy package on EC2
+      # ----------------------------------
+
+      - name: Deploy application on EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          fingerprint: ${{ secrets.EC2_FINGERPRINT }}
+          port: ${{ secrets.EC2_PORT }}
+          timeout: 120s
+          command_timeout: 20m
+          script: |
+            set -eu
+
+            DEPLOY_SHA="${{ github.sha }}"
+            DEPLOY_ROOT="/home/ubuntu/legalai-deploy"
+            ARTIFACT="${DEPLOY_ROOT}/legalai-${DEPLOY_SHA}.tar.gz"
+            STAGE="${DEPLOY_ROOT}/stage-${DEPLOY_SHA}"
+            APP_ROOT="/opt/LegalAIChat"
+
+            echo "Deploying commit ${DEPLOY_SHA}"
+
+            test -f "${ARTIFACT}"
+
+            mkdir -p "${STAGE}"
+            tar -xzf "${ARTIFACT}" -C "${STAGE}"
+
+            test -f "${STAGE}/tllac/requirements.txt"
+            test -f "${STAGE}/ui/dist/index.html"
+
+            # Update backend code while preserving:
+            # - tllac/.env
+            # - tllac/.venv
+            # - legal_corpus.sqlite3
+            sudo rsync -a --delete \
+              --chown=legalai:legalai \
+              --exclude=".env" \
+              --exclude=".venv/" \
+              --exclude="app/data/legal_corpus.sqlite3" \
+              "${STAGE}/tllac/" \
+              "${APP_ROOT}/tllac/"
+
+            # Replace only the compiled frontend.
+            sudo install -d \
+              -o legalai \
+              -g legalai \
+              "${APP_ROOT}/ui/dist"
+
+            sudo rsync -a --delete \
+              --chown=legalai:legalai \
+              "${STAGE}/ui/dist/" \
+              "${APP_ROOT}/ui/dist/"
+
+            # Create the virtual environment only when missing.
+            if [ ! -x "${APP_ROOT}/tllac/.venv/bin/python" ]; then
+              sudo -u legalai python3 -m venv \
+                "${APP_ROOT}/tllac/.venv"
+            fi
+
+            # Install/update backend dependencies.
+            sudo -u legalai -H \
+              "${APP_ROOT}/tllac/.venv/bin/python" \
+              -m pip install \
+              --disable-pip-version-check \
+              -r "${APP_ROOT}/tllac/requirements.txt"
+
+            # Restart backend.
+            sudo systemctl reset-failed legalai-backend.service
+            sudo systemctl restart legalai-backend.service
+
+            # Wait up to 30 seconds for FastAPI.
+            ATTEMPT=0
+
+            until curl -fsS http://127.0.0.1:9001/ >/dev/null; do
+              ATTEMPT=$((ATTEMPT + 1))
+
+              if [ "${ATTEMPT}" -ge 30 ]; then
+                echo "Backend health check failed"
+
+                sudo systemctl status \
+                  legalai-backend.service \
+                  --full \
+                  --no-pager || true
+
+                sudo journalctl \
+                  -u legalai-backend.service \
+                  -n 100 \
+                  --no-pager || true
+
+                exit 1
+              fi
+
+              sleep 1
+            done
+
+            echo "Backend is healthy"
+
+            # Restart frontend Nginx service.
+            sudo systemctl reset-failed legalai-frontend.service
+            sudo systemctl restart legalai-frontend.service
+
+            sleep 2
+
+            # Check frontend.
+            if ! curl -fsS http://127.0.0.1/ >/dev/null; then
+              echo "Frontend health check failed"
+
+              sudo systemctl status \
+                legalai-frontend.service \
+                --full \
+                --no-pager || true
+
+              sudo journalctl \
+                -u legalai-frontend.service \
+                -n 100 \
+                --no-pager || true
+
+              exit 1
+            fi
+
+            echo "Frontend is healthy"
+
+            # Check Nginx-to-FastAPI proxy.
+            if ! curl -fsS http://127.0.0.1/tllac-api/ >/dev/null; then
+              echo "Backend proxy health check failed"
+              exit 1
+            fi
+
+            echo "Backend proxy is healthy"
+
+            # Remove only this deployment's temporary files.
+            rm -rf "${STAGE}"
+            rm -f "${ARTIFACT}"
+
+            echo "Deployment ${DEPLOY_SHA} completed successfully"
