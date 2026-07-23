@@ -56,6 +56,35 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function stripSourceFooter(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lower = normalized.toLowerCase();
+
+  const footerAnchors = [lower.lastIndexOf('\ndisclaimer'), lower.lastIndexOf('\nfinal note'), lower.lastIndexOf('\nconclusion')].filter(
+    (index) => index >= 0,
+  );
+  const searchStart = footerAnchors.length > 0 ? Math.max(...footerAnchors) : Math.floor(lower.length * 0.55);
+
+  const footerMarkers = [
+    '\nrelevant laws:',
+    '\nrelevant laws &',
+    '\nsource check:',
+    '\nsources:',
+    '\nreferences:',
+    '\nverification note:',
+  ];
+
+  let footerStart = -1;
+  for (const marker of footerMarkers) {
+    const index = lower.indexOf(marker, searchStart);
+    if (index >= 0 && (footerStart < 0 || index < footerStart)) {
+      footerStart = index;
+    }
+  }
+
+  return footerStart >= 0 ? normalized.slice(0, footerStart).trimEnd() : normalized;
+}
+
 function insertSectionHeadingBreaks(content: string): string {
   const headings = [
     'Classification',
@@ -99,8 +128,13 @@ function insertSectionHeadingBreaks(content: string): string {
 }
 
 function normalizeMarkdownStructure(content: string): string {
-  const normalized = content
+  const normalized = stripSourceFooter(content)
     .replace(/\r\n/g, '\n')
+    .replace(/^\s*#{1,6}\s*\*\*(.+?)\*\*\s*(?:---\s*)?$/gm, '### $1')
+    .replace(/^\s*\*\*(.+?)\*\*\s*(?:---\s*)?$/gm, '### $1')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(["'`].*?["'`])\*/g, '$1')
+    .replace(/^\s*[-*_]{3,}\s*$/gm, '')
     .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“|ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â|ÃƒÂ¢Ã¢â€šÂ¬"|Ã¢â‚¬â€|Ã¢â‚¬"|â€”|—|–/g, ' - ')
     .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢|Ã¢â‚¬â„¢|â€™/g, "'")
     .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ|ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â|Ã¢â‚¬Å“|Ã¢â‚¬Â|â€œ|â€/g, '"')
@@ -137,6 +171,7 @@ function normalizeMarkdownStructure(content: string): string {
     .replace(/\|\s+\|/g, ' |\n| ')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n\s*\n\s*([0-9]+\.\s+[A-Z])/g, '\n\n$1')
     .trim();
 
   return insertSectionHeadingBreaks(normalized)
