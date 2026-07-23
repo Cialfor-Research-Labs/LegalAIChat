@@ -130,7 +130,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
-          fingerprint: ${{ secrets.EC2_FINGERPRINT }}
+          
           port: ${{ secrets.EC2_PORT }}
           timeout: 120s
           command_timeout: 20m
