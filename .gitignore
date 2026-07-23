@@ -2,10 +2,10 @@
 .env
 .env.*
 !.env.example
+!tllac/.env.example
 tllac/.env
 sample*.py
 sample (*.py
-.env.example
 # Python
 __pycache__/
 *.py[cod]
@@ -59,6 +59,12 @@ Thumbs.db
 # Generated/manual extraction artifacts
 _manual_unzip/
 _manual_text.txt
+json_judgements/
+json_judgements_files/ 
+
+json_law_files/
+tllac/app/data/legal_corpus.sqlite3
+tllac/app/data/legal_corpus.sqlite3.building
 codepush.sh
 BNSS_2023_updated.xlsx
 BNS_2023_updated.xlsx

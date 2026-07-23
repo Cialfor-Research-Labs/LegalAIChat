@@ -7,3 +7,4 @@ botocore[crt]
 cryptography
 email-validator
 psycopg[binary]
+ijson

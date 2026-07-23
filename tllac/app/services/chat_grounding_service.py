@@ -44,6 +44,7 @@ def build_grounding_policy(query: str, rag_result: LegalRagResult) -> GroundingP
     allowed_sections = _extract_user_section_numbers(query)
     for item in rag_result.statute_matches:
         allowed_sections.update(_extract_user_section_numbers(item.reference))
+        allowed_sections.update(_extract_user_section_numbers(item.summary))
 
     allowed_case_titles = {
         _normalize_case_title(item.title)

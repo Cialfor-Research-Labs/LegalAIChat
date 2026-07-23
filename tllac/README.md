@@ -18,6 +18,8 @@ LEGAL_RAG_ENABLED=true
 LEGAL_RAG_MAX_STATUTES=3
 LEGAL_RAG_MAX_CASES=2
 LEGAL_RAG_MAX_CHARS=1800
+LEGAL_RAG_CORPUS_ROOT=..
+LEGAL_RAG_INDEX_PATH=app/data/legal_corpus.sqlite3
 ONLINE_LEGAL_RESEARCH_ENABLED=false
 ```
 
@@ -70,6 +72,18 @@ The UI now expects login and registration before chat access. It uses the same b
 
 ## Chat Retrieval
 
-- Chat RAG is local-first and uses bundled statute data plus a curated case-law corpus.
-- Retrieval is deterministic and in-memory; it does not add a second LLM call.
+- Chat RAG is local-first and uses bundled statute data, a curated case-law corpus, and an optional indexed JSON corpus.
+- Retrieval is deterministic and local; the compact curated data stays in memory while the large corpus is queried from its generated index. It does not add a second LLM call.
 - Sensitive runtime values must stay in `tllac/.env` and should never be committed.
+
+### Building the JSON corpus index
+
+The raw `json_judgements`, `json_judgements_files`, and `json_law_files` directories are intentionally not committed because they total several gigabytes. Place them under `LEGAL_RAG_CORPUS_ROOT`, then run this from the `tllac` directory:
+
+```bash
+python -m app.scripts.build_legal_rag_index
+```
+
+Use `--corpus-root` or `--output` to override the configured locations. The builder streams each JSON array, skips invalid records with warnings, deduplicates by `chunk_id`, and atomically replaces the generated SQLite index only after a successful build. Re-run it whenever the source corpus changes.
+
+The application never builds the index during startup. If the index is missing or incompatible, chat continues using the bundled curated corpus and logs a warning. Request-time retrieval reads only the generated index and never scans the raw JSON directories.

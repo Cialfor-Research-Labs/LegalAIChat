@@ -10,14 +10,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import logging
 import os
 from pathlib import Path
 import re
+import sqlite3
 from threading import Lock
 
 from dotenv import load_dotenv
 
 from .legal_framework import classify_domains
+from .legal_corpus_index import CorpusSearchHit, LegalCorpusIndex
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -25,6 +28,10 @@ load_dotenv(_REPO_ROOT / "tllac" / ".env")
 
 _STATUTES_PATH = _REPO_ROOT / "tllac" / "app" / "data" / "statute_sections.json"
 _CASE_LAW_PATH = _REPO_ROOT / "tllac" / "app" / "data" / "case_law_corpus.json"
+_DEFAULT_CORPUS_INDEX_PATH = _REPO_ROOT / "tllac" / "app" / "data" / "legal_corpus.sqlite3"
+logger = logging.getLogger(__name__)
+_WARNED_CORPUS_PATHS: set[str] = set()
+_CORPUS_WARNING_LOCK = Lock()
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _SECTION_PATTERN = re.compile(r"\b(?:section|sec\.?|s\.)\s*(\d+[a-z]?(?:\(\d+\))?)\b", re.I)
@@ -265,6 +272,120 @@ def _build_domain_hint_tokens(query: str) -> set[str]:
         for statute in mapping.statutes:
             hints.update(_tokenize(statute))
     return hints
+
+
+def _corpus_index_path() -> Path:
+    configured = os.getenv("LEGAL_RAG_INDEX_PATH", "").strip()
+    return Path(configured).expanduser() if configured else _DEFAULT_CORPUS_INDEX_PATH
+
+
+def _warn_corpus_once(path: Path, message: str) -> None:
+    key = f"{path.resolve()}:{message}"
+    with _CORPUS_WARNING_LOCK:
+        if key in _WARNED_CORPUS_PATHS:
+            return
+        _WARNED_CORPUS_PATHS.add(key)
+    logger.warning("Legal JSON corpus unavailable (%s): %s. Using curated corpus only.", path, message)
+
+
+def _infer_act_key(title: str) -> str:
+    normalized = _normalize_text(title)
+    for act_key, aliases in _ACT_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            return act_key
+    return ""
+
+
+def _corpus_reference(hit: CorpusSearchHit, query: str) -> str:
+    if hit.authority_type == "case":
+        court_year = " ".join(part for part in (hit.court, f"({hit.year})" if hit.year else "") if part).strip()
+        location = f"p. {hit.page_number}" if hit.page_number else hit.chunk_id
+        return ", ".join(part for part in (court_year, location) if part)
+
+    section = hit.section.strip()
+    if section and section.lower() != "general":
+        return section
+    requested_sections = sorted(_extract_section_terms(query))
+    searchable = f"{hit.title} {hit.chunk_text}".lower()
+    for requested_section in requested_sections:
+        if re.search(rf"\b(?:section\s*)?{re.escape(requested_section)}\b", searchable, re.I):
+            return f"Section {requested_section} ({hit.chunk_id})"
+    return f"Chunk {hit.chunk_id}"
+
+
+def _convert_corpus_hit(hit: CorpusSearchHit, query: str) -> RetrievedAuthority:
+    source = f"{hit.source_json} [{hit.chunk_id}"
+    if hit.source_path:
+        source += f"; source: {hit.source_path}"
+    source += "]"
+    return RetrievedAuthority(
+        authority_type=hit.authority_type,
+        title=hit.title or ("Indian statute" if hit.authority_type == "statute" else "Indian judgment"),
+        reference=_corpus_reference(hit, query),
+        summary=_truncate_text(hit.chunk_text, 520 if hit.authority_type == "statute" else 420),
+        score=hit.score,
+        source_file=source,
+        act_key=_infer_act_key(hit.title) if hit.authority_type == "statute" else "",
+    )
+
+
+def _retrieve_corpus_matches(query: str) -> tuple[list[RetrievedAuthority], list[RetrievedAuthority]]:
+    path = _corpus_index_path()
+    index = LegalCorpusIndex(path)
+    if not index.is_compatible():
+        _warn_corpus_once(path, "missing or incompatible index")
+        return ([], [])
+    candidate_limit = max(1, _env_int("LEGAL_RAG_CORPUS_CANDIDATE_LIMIT", 100))
+    statute_limit = _env_int("LEGAL_RAG_CORPUS_MAX_STATUTES", 3)
+    case_limit = _env_int("LEGAL_RAG_CORPUS_MAX_CASES", 3)
+    try:
+        statutes = index.search(query, "statute", limit=statute_limit, candidate_limit=candidate_limit)
+        cases = index.search(query, "case", limit=case_limit, candidate_limit=candidate_limit)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        _warn_corpus_once(path, str(exc))
+        return ([], [])
+    return (
+        [_convert_corpus_hit(item, query) for item in statutes],
+        [_convert_corpus_hit(item, query) for item in cases],
+    )
+
+
+def _merge_authorities(
+    curated: list[RetrievedAuthority],
+    corpus: list[RetrievedAuthority],
+    *,
+    max_items: int,
+    preserve_curated_only: bool = False,
+    curated_first: bool = False,
+) -> list[RetrievedAuthority]:
+    if max_items <= 0:
+        return []
+    candidates = list(curated)
+    if not preserve_curated_only and not curated_first:
+        candidates.extend(corpus)
+        candidates.sort(
+            key=lambda item: (
+                -item.score,
+                0 if item in curated else 1,
+                item.title.lower(),
+                item.reference.lower(),
+            )
+        )
+    elif not preserve_curated_only:
+        candidates.extend(
+            sorted(corpus, key=lambda item: (-item.score, item.title.lower(), item.reference.lower()))
+        )
+    selected: list[RetrievedAuthority] = []
+    seen: set[tuple[str, str]] = set()
+    for item in candidates:
+        key = (_normalize_text(item.title), _normalize_text(item.reference))
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(item)
+        if len(selected) >= max_items:
+            break
+    return selected
 
 
 class _LegalRagIndex:
@@ -559,7 +680,25 @@ def retrieve_legal_rag_result(query: str) -> LegalRagResult:
     if not legal_rag_enabled() or not normalized_query:
         return LegalRagResult(query=normalized_query, statute_matches=(), case_matches=())
 
-    statute_matches, case_matches = _INDEX.retrieve(normalized_query)
+    curated_statutes, curated_cases = _INDEX.retrieve(normalized_query)
+    corpus_statutes, corpus_cases = _retrieve_corpus_matches(normalized_query)
+    exact_curated_section = bool(
+        _extract_section_terms(normalized_query)
+        and _extract_act_keys(normalized_query)
+        and curated_statutes
+    )
+    statute_matches = _merge_authorities(
+        curated_statutes,
+        corpus_statutes,
+        max_items=_env_int("LEGAL_RAG_MAX_STATUTES", 3),
+        preserve_curated_only=exact_curated_section,
+        curated_first=True,
+    )
+    case_matches = _merge_authorities(
+        curated_cases,
+        corpus_cases,
+        max_items=_env_int("LEGAL_RAG_MAX_CASES", 2),
+    )
     return LegalRagResult(
         query=normalized_query,
         statute_matches=tuple(statute_matches),
