@@ -7,7 +7,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from ..services.bedrock_llm_service import generate_response
+from ..services.bedrock_llm_service import generate_notice_response
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -38,9 +38,11 @@ def build_legal_notice_prompt(
     recipient_details: str = "",
     relevant_info: str = "",
 ) -> str:
+    """Build the user-turn prompt containing only the case inputs."""
     return (
-        f"{get_notice_generator_prompt()}\n\n"
-        "Generate the legal notice using only the case inputs below. Return only the final notice text.\n\n"
+        "Generate the legal notice using only the case inputs below."
+        " Return only the final notice text, ready to sign and dispatch."
+        " Do not include any explanations, headings, markdown, or commentary outside the notice itself.\n\n"
         f"Client name and details:\n{client_details.strip() or '[Client details not provided]'}\n\n"
         f"Lawyer/advocate details:\n{lawyer_details.strip() or '[Lawyer details not provided]'}\n\n"
         f"Recipient/opposite party details:\n{recipient_details.strip() or '[Recipient details not provided]'}\n\n"
@@ -57,11 +59,12 @@ def generate_legal_notice(
     recipient_details: str = "",
     relevant_info: str = "",
 ) -> str:
-    prompt = build_legal_notice_prompt(
+    system_prompt = get_notice_generator_prompt()
+    user_prompt = build_legal_notice_prompt(
         client_details=client_details,
         lawyer_details=lawyer_details,
         recipient_details=recipient_details,
         case_details=case_details,
         relevant_info=relevant_info,
     )
-    return generate_response(prompt)
+    return generate_notice_response(user_prompt, system_prompt)
