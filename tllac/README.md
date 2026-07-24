@@ -18,6 +18,8 @@ LEGAL_RAG_ENABLED=true
 LEGAL_RAG_MAX_STATUTES=3
 LEGAL_RAG_MAX_CASES=2
 LEGAL_RAG_MAX_CHARS=1800
+LEGAL_RAG_MIN_RESPONSE_CONFIDENCE=0.42
+LEGAL_RAG_ALLOW_ONLINE_CONTEXT=false
 LEGAL_RAG_CORPUS_ROOT=..
 LEGAL_RAG_INDEX_PATH=app/data/legal_corpus.sqlite3
 ONLINE_LEGAL_RESEARCH_ENABLED=false
@@ -87,3 +89,13 @@ python -m app.scripts.build_legal_rag_index
 Use `--corpus-root` or `--output` to override the configured locations. The builder streams each JSON array, skips invalid records with warnings, deduplicates by `chunk_id`, and atomically replaces the generated SQLite index only after a successful build. Re-run it whenever the source corpus changes.
 
 The application never builds the index during startup. If the index is missing or incompatible, chat continues using the bundled curated corpus and logs a warning. Request-time retrieval reads only the generated index and never scans the raw JSON directories.
+
+### Evaluating retrieval quality
+
+Run the built-in benchmark script to inspect retrieval precision, recall, groundedness, citation accuracy, hallucination rate, and response relevance:
+
+```bash
+python -m app.scripts.evaluate_legal_rag
+```
+
+Pass `--responses path/to/responses.json` if you want to score stored model answers against the benchmark.

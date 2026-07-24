@@ -13,13 +13,19 @@ from .legal_rag_service import LegalRagResult, RetrievedAuthority
 _SECTION_CAPTURE_PATTERN = re.compile(r"\b(?:section|sec\.?|s\.)\s*(\d+[a-z]?(?:\(\d+\))?)\b", re.I)
 _SECTION_TEXT_PATTERN = re.compile(r"\b(?:(?P<act>bns|bnss|bsa|ipc|crpc|cpc)\s+)?(?P<label>section|sec\.?|s\.)\s*(?P<number>\d+[a-z]?(?:\(\d+\))?)\b", re.I)
 _CASE_CITATION_PATTERN = re.compile(r"\b([A-Z][A-Za-z0-9.&'() -]{1,80}\s+v\.?\s+[A-Z][A-Za-z0-9.&'() -]{1,80})\b")
+_ACT_CITATION_PATTERN = re.compile(
+    r"\b(?:bns|bnss|bsa|ipc|crpc|cpc|mva|motor vehicles act|information technology act|it act|consumer protection act|specific relief act|contract act|constitution of india|articles? of the constitution)\b",
+    re.I,
+)
 _UNSUPPORTED_SECTION_PLACEHOLDER = "the exact current statutory provision should be verified from the statute text"
+_UNSUPPORTED_ACT_PLACEHOLDER = "the exact applicable statute should be verified from the retrieved documents"
 
 
 @dataclass(frozen=True)
 class GroundingPolicy:
     allowed_section_numbers: frozenset[str]
     allowed_case_titles: frozenset[str]
+    allowed_act_names: frozenset[str]
     weak_grounding: bool
 
 
@@ -42,9 +48,12 @@ def _extract_user_section_numbers(query: str) -> set[str]:
 
 def build_grounding_policy(query: str, rag_result: LegalRagResult) -> GroundingPolicy:
     allowed_sections = _extract_user_section_numbers(query)
+    allowed_act_names: set[str] = set()
     for item in rag_result.statute_matches:
         allowed_sections.update(_extract_user_section_numbers(item.reference))
         allowed_sections.update(_extract_user_section_numbers(item.summary))
+        allowed_act_names.add(_normalize_case_title(item.title))
+        allowed_act_names.add(_normalize_case_title(item.reference))
 
     allowed_case_titles = {
         _normalize_case_title(item.title)
@@ -55,6 +64,7 @@ def build_grounding_policy(query: str, rag_result: LegalRagResult) -> GroundingP
     return GroundingPolicy(
         allowed_section_numbers=frozenset(filter(None, allowed_sections)),
         allowed_case_titles=frozenset(filter(None, allowed_case_titles)),
+        allowed_act_names=frozenset(filter(None, allowed_act_names)),
         weak_grounding=weak_grounding,
     )
 
@@ -87,6 +97,21 @@ def _neutralize_unsupported_case_citations(text: str, policy: GroundingPolicy) -
         return "a reported decision that should be verified from authoritative sources"
 
     return _CASE_CITATION_PATTERN.sub(replace, text), changed
+
+
+def _neutralize_unsupported_act_citations(text: str, policy: GroundingPolicy) -> tuple[str, bool]:
+    changed = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal changed
+        act_text = _normalize_case_title(match.group(0))
+        if any(allowed in act_text for allowed in policy.allowed_act_names if allowed):
+            return match.group(0)
+
+        changed = True
+        return _UNSUPPORTED_ACT_PLACEHOLDER
+
+    return _ACT_CITATION_PATTERN.sub(replace, text), changed
 
 
 def _append_grounding_note(text: str, *, cite_warning: bool, weak_grounding: bool) -> str:
@@ -125,6 +150,12 @@ def _cleanup_placeholder_phrases(text: str) -> str:
     cleaned = re.sub(
         re.escape(_UNSUPPORTED_SECTION_PLACEHOLDER) + r"\s*\(\d+(?:\([a-z0-9]+\))?\)",
         _UNSUPPORTED_SECTION_PLACEHOLDER,
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(
+        re.escape("the applicable statute"),
+        _UNSUPPORTED_ACT_PLACEHOLDER,
         cleaned,
         flags=re.I,
     )
@@ -224,6 +255,7 @@ def sanitize_grounded_response(
     policy = build_grounding_policy(current_query, rag_result)
     sanitized_text, unsupported_sections_found = _neutralize_unsupported_sections(response_text, policy)
     sanitized_text, unsupported_cases_found = _neutralize_unsupported_case_citations(sanitized_text, policy)
+    sanitized_text, unsupported_acts_found = _neutralize_unsupported_act_citations(sanitized_text, policy)
     sanitized_text = _cleanup_placeholder_phrases(sanitized_text)
     sanitized_text = _restore_markdown_emphasis(sanitized_text)
     sanitized_text = _restore_response_formatting(sanitized_text)
@@ -231,6 +263,6 @@ def sanitize_grounded_response(
 
     return _append_grounding_note(
         sanitized_text,
-        cite_warning=unsupported_sections_found or unsupported_cases_found,
+        cite_warning=unsupported_sections_found or unsupported_cases_found or unsupported_acts_found,
         weak_grounding=policy.weak_grounding,
     )

@@ -1,0 +1,63 @@
+[
+  {
+    "query": "A drunk driver hit my bike and I got injured. What legal action can I take?",
+    "expected_statutes": [
+      {"act_key": "bns", "reference": "Section 281"},
+      {"act_key": "bns", "reference": "Section 125"}
+    ],
+    "expected_cases": [
+      {"title_contains": "N.K.V. Bros."},
+      {"title_contains": "Sarla Verma"}
+    ]
+  },
+  {
+    "query": "My wife is threatening to file a false dowry case against me. What sections apply and what should I do?",
+    "expected_statutes": [
+      {"act_key": "bns", "reference": "Section 248"},
+      {"act_key": "bnss", "reference": "Section 482"},
+      {"act_key": "bsa", "reference": "Section 57"}
+    ],
+    "expected_cases": [
+      {"title_contains": "Arnesh Kumar"},
+      {"title_contains": "Satender Kumar Antil"}
+    ]
+  },
+  {
+    "query": "Explain Section 14 of the Specific Relief Act and when specific performance is unavailable.",
+    "expected_statutes": [
+      {"title_contains": "Specific Relief Act", "reference": "Section 14"}
+    ],
+    "expected_cases": [
+      {"title_contains": "K.S. Vidyanadam"}
+    ]
+  },
+  {
+    "query": "What does Section 482 BNSS say about anticipatory bail?",
+    "expected_statutes": [
+      {"act_key": "bnss", "reference": "Section 482"}
+    ],
+    "expected_cases": [
+      {"title_contains": "Arnesh Kumar"},
+      {"title_contains": "Satender Kumar Antil"}
+    ]
+  },
+  {
+    "query": "What is Article 21 of the Constitution and how does privacy fit within it?",
+    "expected_statutes": [
+      {"act_key": "constitution", "reference": "Article 21"}
+    ],
+    "expected_cases": [
+      {"title_contains": "K.S. Puttaswamy"}
+    ]
+  },
+  {
+    "query": "How do motor accident compensation claims work in India?",
+    "expected_statutes": [
+      {"title_contains": "Motor Vehicles Act"}
+    ],
+    "expected_cases": [
+      {"title_contains": "N.K.V. Bros."},
+      {"title_contains": "Sarla Verma"}
+    ]
+  }
+]
