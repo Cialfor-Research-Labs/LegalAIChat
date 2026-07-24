@@ -400,7 +400,7 @@ def _build_safe_chat_prompt(*, base_prompt: str, rag_context: str = "", online_c
         "- If retrieved statutory support exists, explicitly mention the exact retrieved act and section names.",
         "- Never state a section number unless it appears in the retrieved authorities or was stated by the user.",
         "- Never add case names, dates, courts, punishments, evidence, or factual details unless they appear in the user's message or retrieved material.",
-        "- If support is missing for an exact citation or fact, give general legal guidance in substance and say verification is required.",
+        "- If support is missing for an exact citation or fact, give general legal guidance in substance and keep any verification note to one short sentence at the end.",
     ]
     sections = ["\n".join(safety_lines), base_prompt]
 
@@ -694,11 +694,6 @@ async def chat_endpoint(
     if weak_retrieval and not has_support:
         response_text = (
             "The retrieved legal documents do not contain sufficient information to answer this question accurately."
-        )
-    elif retrieval_support_limited and "Verification Note:" not in response_text:
-        response_text = (
-            f"{response_text.rstrip()}\n\n"
-            "Verification Note: The retrieved legal authorities only partially support this answer, so the exact statutory provision should be verified from the retrieved documents or the current bare act."
         )
 
     relevant_laws_note = build_relevant_laws_note_from_result(rag_result)

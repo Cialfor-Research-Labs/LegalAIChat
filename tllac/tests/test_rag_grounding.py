@@ -16,6 +16,12 @@ from app.services.legal_rag_service import (
 )
 
 
+_FINAL_VERIFICATION_NOTE = (
+    "Note: This summary is based on the available legal corpus. "
+    "Please refer to the official statute for authoritative legal interpretation."
+)
+
+
 class LegalRagConsistencyTests(unittest.TestCase):
     def test_normalize_legal_rag_query_collapses_whitespace(self) -> None:
         self.assertEqual(
@@ -121,8 +127,8 @@ class GroundingSanitizerTests(unittest.TestCase):
         )
 
         self.assertNotIn("Section 304", sanitized)
-        self.assertIn("exact current statutory provision should be verified", sanitized)
-        self.assertIn("Verification Note:", sanitized)
+        self.assertIn(_FINAL_VERIFICATION_NOTE, sanitized)
+        self.assertEqual(sanitized.count(_FINAL_VERIFICATION_NOTE), 1)
 
     def test_sanitizer_allows_user_supplied_section_numbers(self) -> None:
         sanitized = sanitize_grounded_response(
@@ -142,7 +148,7 @@ class GroundingSanitizerTests(unittest.TestCase):
 
         self.assertIn("Section 281", sanitized)
         self.assertNotIn("Section 125", sanitized)
-        self.assertIn("exact current statutory provision should be verified", sanitized)
+        self.assertIn(_FINAL_VERIFICATION_NOTE, sanitized)
 
     def test_sanitizer_allows_sections_found_in_retrieved_statute_text(self) -> None:
         rag_result = LegalRagResult(
@@ -167,7 +173,7 @@ class GroundingSanitizerTests(unittest.TestCase):
         )
 
         self.assertIn("Section 14", sanitized)
-        self.assertNotIn("exact current statutory provision should be verified", sanitized)
+        self.assertNotIn(_FINAL_VERIFICATION_NOTE, sanitized)
 
     def test_sanitizer_removes_old_placeholder_phrase(self) -> None:
         sanitized = sanitize_grounded_response(
@@ -237,7 +243,7 @@ class GroundingSanitizerTests(unittest.TestCase):
         )
 
         self.assertNotIn("Imaginary Case v. State of India", sanitized)
-        self.assertIn("reported decision that should be verified", sanitized)
+        self.assertIn(_FINAL_VERIFICATION_NOTE, sanitized)
 
 
 if __name__ == "__main__":
