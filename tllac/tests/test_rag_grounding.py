@@ -8,6 +8,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "tllac"))
 
 from app.services.chat_grounding_service import sanitize_grounded_response
 from app.services.legal_rag_service import (
+    build_legal_rag_context_from_result,
     LegalRagResult,
     RetrievedAuthority,
     normalize_legal_rag_query,
@@ -48,6 +49,17 @@ class LegalRagConsistencyTests(unittest.TestCase):
         self.assertEqual(
             [item.title for item in first.case_matches],
             [item.title for item in second.case_matches],
+        )
+
+    def test_empty_retrieval_produces_low_confidence_and_insufficient_context(self) -> None:
+        result = retrieve_legal_rag_result("flibbertigibbet")
+
+        self.assertFalse(result.statute_matches)
+        self.assertFalse(result.case_matches)
+        self.assertLess(result.confidence, 0.1)
+        self.assertIn(
+            "The retrieved legal documents do not contain sufficient information",
+            build_legal_rag_context_from_result(result),
         )
 
     def test_exact_section_query_does_not_fall_back_to_numeric_prefixes(self) -> None:

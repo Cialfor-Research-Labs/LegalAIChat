@@ -16,13 +16,18 @@ REPO_ROOT = Path(__file__).resolve().parent
 load_dotenv(REPO_ROOT / ".env")
 
 
+def _looks_placeholder_database_url(value: str) -> bool:
+    normalized = (value or "").strip().lower()
+    return not normalized or "user:password@host" in normalized or normalized.endswith("@host:5432/legalaichat")
+
+
 def _admin_url() -> str:
     explicit = os.getenv("POSTGRES_ADMIN_URL", "").strip()
-    if explicit:
+    if explicit and not _looks_placeholder_database_url(explicit):
         return explicit
 
     database_url = os.getenv("DATABASE_URL", "").strip()
-    if not database_url:
+    if not database_url or _looks_placeholder_database_url(database_url):
         raise RuntimeError("DATABASE_URL or POSTGRES_ADMIN_URL is missing from tllac/.env.")
 
     parsed = urlparse(database_url)
@@ -99,7 +104,7 @@ def _build_database_url(database_name: str, app_user: str, app_password: str) ->
 
 def _app_database_url() -> str:
     database_url = os.getenv("DATABASE_URL", "").strip()
-    if database_url:
+    if database_url and not _looks_placeholder_database_url(database_url):
         return database_url
 
     database_name, app_user, app_password = _app_db_settings()
@@ -139,8 +144,13 @@ def main() -> int:
                     app_user,
                     app_password,
                 )
-            except OperationalError as exc:
-                raise _admin_auth_hint(exc) from exc
+            except (OperationalError, RuntimeError) as exc:
+                print(
+                    "Skipping Postgres bootstrap because the local admin connection is not available. "
+                    "The app will use local fallback storage for this session.",
+                    file=sys.stderr,
+                )
+                return 0
 
         from app.db.db_client import db_client
 

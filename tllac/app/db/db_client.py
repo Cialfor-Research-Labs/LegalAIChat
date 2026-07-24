@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
 from uuid import uuid4
+from urllib.parse import quote
 
 # ── Token-usage defaults ────────────────────────────────────────────────────
 _DEFAULT_DAILY_TOKEN_LIMIT = int(os.getenv("DAILY_TOKEN_LIMIT", "100000"))
@@ -34,17 +35,26 @@ load_dotenv(_REPO_ROOT / "tllac" / ".env")
 
 class DBClient:
     def __init__(self, db_url: Optional[str] = None):
-        self._db_url = db_url or os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
-        if not self._db_url:
-            raise RuntimeError(
-                "DATABASE_URL is required for authenticated chat storage. "
-                "Configure a Postgres connection string in tllac/.env."
-            )
+        self._db_url = db_url or self._resolve_database_url()
 
         self._encryption = Fernet(self._build_fernet_key())
         self._lock = Lock()
-        self._ensure_schema()
-        logger.info("DBClient initialized with Postgres.")
+        self._backend = "memory"
+        self._init_memory_store()
+
+        if self._db_url:
+            try:
+                self._ensure_schema()
+                self._backend = "postgres"
+                logger.info("DBClient initialized with Postgres.")
+                return
+            except Exception as exc:
+                logger.warning(
+                    "Postgres storage is unavailable (%s). Falling back to local in-memory storage.",
+                    exc,
+                )
+
+        logger.info("DBClient initialized with local fallback storage.")
 
     @staticmethod
     def _now() -> datetime:
@@ -68,6 +78,42 @@ class DBClient:
 
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
         return base64.urlsafe_b64encode(digest)
+
+    @staticmethod
+    def _looks_placeholder_database_url(value: str) -> bool:
+        normalized = (value or "").strip().lower()
+        return not normalized or "user:password@host" in normalized or normalized.endswith("@host:5432/legalaichat")
+
+    def _build_database_url_from_parts(self) -> str | None:
+        database_name = os.getenv("POSTGRES_DB", "").strip() or "legalaichat"
+        app_user = os.getenv("POSTGRES_APP_USER", "").strip()
+        app_password = os.getenv("POSTGRES_APP_PASSWORD", "").strip()
+        host = os.getenv("POSTGRES_HOST", "").strip() or "localhost"
+        port = os.getenv("POSTGRES_PORT", "").strip() or "5432"
+
+        if not app_user or not app_password:
+            return None
+
+        return (
+            f"postgresql://{quote(app_user)}:{quote(app_password)}"
+            f"@{host}:{port}/{quote(database_name)}"
+        )
+
+    def _resolve_database_url(self) -> str | None:
+        direct = os.getenv("DATABASE_URL", "").strip()
+        if direct and not self._looks_placeholder_database_url(direct):
+            return direct
+
+        fallback = os.getenv("POSTGRES_URL", "").strip()
+        if fallback and not self._looks_placeholder_database_url(fallback):
+            return fallback
+
+        return self._build_database_url_from_parts()
+
+    def _init_memory_store(self) -> None:
+        self._memory_users: dict[str, dict[str, Any]] = {}
+        self._memory_sessions: dict[str, dict[str, Any]] = {}
+        self._memory_artifacts: dict[str, dict[str, Any]] = {}
 
     def _connect(self):
         return psycopg.connect(self._db_url, row_factory=dict_row)
@@ -178,6 +224,20 @@ class DBClient:
         normalized_email = email.strip().lower()
         user_id = str(uuid4())
         password_hash = self._make_password_hash(password)
+        if self._backend != "postgres":
+            if any(user["email"] == normalized_email for user in self._memory_users.values()):
+                raise ValueError("An account with this email already exists.")
+            user = {
+                "user_id": user_id,
+                "email": normalized_email,
+                "full_name": full_name.strip(),
+                "password_hash": password_hash,
+                "created_at": self._now(),
+                "updated_at": self._now(),
+            }
+            self._memory_users[user_id] = user
+            return {"user_id": user_id, "email": normalized_email, "full_name": full_name.strip()}
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT user_id FROM app_users WHERE email = %s", (normalized_email,))
@@ -195,6 +255,16 @@ class DBClient:
 
     def authenticate_user(self, email: str, password: str) -> Optional[dict[str, str]]:
         normalized_email = email.strip().lower()
+        if self._backend != "postgres":
+            row = next((user for user in self._memory_users.values() if user["email"] == normalized_email), None)
+            if not row or not self._verify_password(password, row["password_hash"]):
+                return None
+            return {
+                "user_id": str(row["user_id"]),
+                "email": row["email"],
+                "full_name": row["full_name"],
+            }
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -215,6 +285,16 @@ class DBClient:
         }
 
     def get_user_by_id(self, user_id: str) -> Optional[dict[str, str]]:
+        if self._backend != "postgres":
+            row = self._memory_users.get(user_id)
+            if not row:
+                return None
+            return {
+                "user_id": str(row["user_id"]),
+                "email": row["email"],
+                "full_name": row["full_name"],
+            }
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -233,6 +313,27 @@ class DBClient:
     def ensure_session(self, user_id: str, session_id: Optional[str], title_hint: str = "") -> str:
         resolved = session_id or str(uuid4())
         title = (title_hint or "New Chat").strip()[:80] or "New Chat"
+        if self._backend != "postgres":
+            if user_id not in self._memory_users:
+                raise ValueError("Session does not belong to the authenticated user.")
+            session = self._memory_sessions.get(resolved)
+            if session and session["user_id"] != user_id:
+                raise ValueError("Session does not belong to the authenticated user.")
+            if not session:
+                self._memory_sessions[resolved] = {
+                    "session_id": resolved,
+                    "user_id": user_id,
+                    "title": title,
+                    "created_at": self._now(),
+                    "updated_at": self._now(),
+                    "messages": [],
+                }
+            else:
+                if session["title"] == "New Chat" and title != "New Chat":
+                    session["title"] = title
+                session["updated_at"] = self._now()
+            return resolved
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -259,6 +360,23 @@ class DBClient:
 
     def append_message(self, user_id: str, session_id: str, role: str, content: str) -> None:
         encrypted = self._encrypt(content)
+        if self._backend != "postgres":
+            session = self._memory_sessions.get(session_id)
+            if not session or session["user_id"] != user_id:
+                raise ValueError("Session does not belong to the authenticated user.")
+            if session["title"] == "New Chat" and role == "user" and content.strip():
+                session["title"] = content.strip()[:80]
+            session["messages"].append(
+                {
+                    "message_id": str(uuid4()),
+                    "role": role,
+                    "encrypted_content": encrypted,
+                    "created_at": self._now(),
+                }
+            )
+            session["updated_at"] = self._now()
+            return
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -294,6 +412,23 @@ class DBClient:
     ) -> list[dict[str, str]]:
         if not session_id:
             return []
+        if self._backend != "postgres":
+            session = self._memory_sessions.get(session_id)
+            if not session or session["user_id"] != user_id:
+                return []
+            rows = session["messages"][:]
+            if limit:
+                rows = rows[:limit]
+            return [
+                {
+                    "id": str(row["message_id"]),
+                    "role": str(row["role"]),
+                    "content": self._decrypt(bytes(row["encrypted_content"])),
+                    "timestamp": row["created_at"].astimezone(timezone.utc).isoformat(),
+                }
+                for row in rows
+            ]
+
         query = """
             SELECT m.message_id, m.role, m.encrypted_content, m.created_at
             FROM chat_messages m
@@ -320,6 +455,23 @@ class DBClient:
         ]
 
     def list_sessions(self, user_id: str) -> list[dict[str, str]]:
+        if self._backend != "postgres":
+            rows = [
+                session
+                for session in self._memory_sessions.values()
+                if session["user_id"] == user_id
+            ]
+            rows.sort(key=lambda item: item["updated_at"], reverse=True)
+            return [
+                {
+                    "session_id": str(row["session_id"]),
+                    "title": row["title"],
+                    "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+                    "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+                }
+                for row in rows
+            ]
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -343,6 +495,18 @@ class DBClient:
         ]
 
     def get_session_messages(self, user_id: str, session_id: str) -> dict[str, Any]:
+        if self._backend != "postgres":
+            row = self._memory_sessions.get(session_id)
+            if not row or row["user_id"] != user_id:
+                raise ValueError("Session not found.")
+            return {
+                "session_id": str(row["session_id"]),
+                "title": row["title"],
+                "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+                "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+                "messages": self.get_messages(user_id, session_id),
+            }
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -377,6 +541,18 @@ class DBClient:
         resolved_artifact_id = artifact_id or str(uuid4())
         encrypted_input = self._encrypt(json.dumps(input_payload))
         encrypted_output = self._encrypt(output_text)
+        if self._backend != "postgres":
+            self._memory_artifacts[resolved_artifact_id] = {
+                "artifact_id": resolved_artifact_id,
+                "user_id": user_id,
+                "artifact_type": artifact_type,
+                "title": title.strip()[:120] or artifact_type,
+                "encrypted_input": encrypted_input,
+                "encrypted_output": encrypted_output,
+                "created_at": self._now(),
+                "updated_at": self._now(),
+            }
+            return resolved_artifact_id
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -409,6 +585,23 @@ class DBClient:
         return str(row["artifact_id"])
 
     def list_generated_artifacts(self, user_id: str, artifact_type: str) -> list[dict[str, str]]:
+        if self._backend != "postgres":
+            rows = [
+                artifact
+                for artifact in self._memory_artifacts.values()
+                if artifact["user_id"] == user_id and artifact["artifact_type"] == artifact_type
+            ]
+            rows.sort(key=lambda item: item["updated_at"], reverse=True)
+            return [
+                {
+                    "artifact_id": str(row["artifact_id"]),
+                    "title": row["title"],
+                    "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+                    "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+                }
+                for row in rows
+            ]
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -432,6 +625,19 @@ class DBClient:
         ]
 
     def get_generated_artifact(self, user_id: str, artifact_id: str, artifact_type: str) -> dict[str, Any]:
+        if self._backend != "postgres":
+            row = self._memory_artifacts.get(artifact_id)
+            if not row or row["user_id"] != user_id or row["artifact_type"] != artifact_type:
+                raise ValueError("Generated item not found.")
+            return {
+                "artifact_id": str(row["artifact_id"]),
+                "title": row["title"],
+                "created_at": row["created_at"].astimezone(timezone.utc).isoformat(),
+                "updated_at": row["updated_at"].astimezone(timezone.utc).isoformat(),
+                "input_payload": json.loads(self._decrypt(bytes(row["encrypted_input"]))),
+                "output_text": self._decrypt(bytes(row["encrypted_output"])),
+            }
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
