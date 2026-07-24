@@ -6,6 +6,7 @@ import { getDocumentSkillByType } from './documentSkills';
 import ChatPage from './experimental-chat/ChatPage';
 import { requestWithFallback } from './experimental-chat/api';
 import { LegalNoticeDraft, LegalNoticeGenerator } from './LegalNoticeGenerator';
+import { TokenUsageBadge } from './TokenUsageBadge';
 
 type ActiveTab = 'chat' | 'legal-notice' | 'document-generator';
 type AuthMode = 'login' | 'register';
@@ -122,6 +123,9 @@ export const App: React.FC = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(Boolean(authToken));
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
+  // Increment after every LLM call so the usage badge re-fetches immediately
+  const [usageRefreshKey, setUsageRefreshKey] = useState(0);
+  const bumpUsage = () => setUsageRefreshKey((k) => k + 1);
 
   useEffect(() => {
     if (!authToken) {
@@ -258,6 +262,7 @@ export const App: React.FC = () => {
       setNoticeDraft({ ...input, notice });
       setActiveNoticeHistoryId(typeof result.history_id === 'string' ? result.history_id : null);
       await loadNoticeHistory(authToken);
+      bumpUsage();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to generate legal notice.';
       setNoticeError(message);
@@ -340,6 +345,7 @@ export const App: React.FC = () => {
       });
       setActiveDocumentHistoryId(typeof data.history_id === 'string' ? data.history_id : null);
       await loadDocumentHistory(authToken);
+      bumpUsage();
     } catch (error) {
       setDocumentError(error instanceof Error ? error.message : 'Unable to prepare document draft.');
     } finally {
@@ -440,6 +446,8 @@ export const App: React.FC = () => {
       <div className="sticky top-0 z-40 border-b border-outline-variant/20 bg-surface-container">
         <div className="flex items-center justify-between px-4 md:px-6">
           <div className="hidden text-sm text-on-surface-variant md:block">{currentUser.email}</div>
+          {/* Token usage badge — sits between email and tabs */}
+          <TokenUsageBadge authToken={authToken} refreshKey={usageRefreshKey} />
           <div className="ml-auto flex items-center justify-end">
             <button type="button" onClick={() => setActiveTab('chat')} className={tabClass('chat')}>
               <MessageSquare size={17} />
@@ -473,6 +481,7 @@ export const App: React.FC = () => {
             user={currentUser}
             onLogout={handleLogout}
             onGenerateLegalNotice={generateNoticeFromChat}
+            onUsageBump={bumpUsage}
           />
         ) : activeTab === 'legal-notice' ? (
           <LegalNoticeGenerator

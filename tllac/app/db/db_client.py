@@ -5,7 +5,7 @@ Postgres-backed chat and auth persistence for TLLAC.
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -15,6 +15,11 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
 from uuid import uuid4
+
+# ── Token-usage defaults ────────────────────────────────────────────────────
+_DEFAULT_DAILY_TOKEN_LIMIT = int(os.getenv("DAILY_TOKEN_LIMIT", "100000"))
+_DEFAULT_COOLDOWN_HOURS = float(os.getenv("TOKEN_COOLDOWN_HOURS", "6"))
+_CHARS_PER_TOKEN = 4  # simple heuristic: ~4 chars per token
 
 from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
@@ -116,6 +121,17 @@ class DBClient:
 
                     CREATE INDEX IF NOT EXISTS idx_generated_artifacts_user_type_updated
                     ON generated_artifacts (user_id, artifact_type, updated_at DESC);
+
+                    CREATE TABLE IF NOT EXISTS user_token_usage (
+                        user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+                        usage_date DATE NOT NULL,
+                        tokens_used INTEGER NOT NULL DEFAULT 0,
+                        cooldown_until TIMESTAMPTZ,
+                        PRIMARY KEY (user_id, usage_date)
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_user_token_usage_user_date
+                    ON user_token_usage (user_id, usage_date DESC);
                     """
                 )
             conn.commit()
@@ -437,6 +453,144 @@ class DBClient:
             "input_payload": json.loads(self._decrypt(bytes(row["encrypted_input"]))),
             "output_text": self._decrypt(bytes(row["encrypted_output"])),
         }
+
+
+    # ── Token usage ──────────────────────────────────────────────────────────
+
+    def _today_utc(self) -> str:
+        """Return the current UTC date as an ISO date string YYYY-MM-DD."""
+        return datetime.now(timezone.utc).date().isoformat()
+
+    def record_token_usage(self, user_id: str, text: str) -> None:
+        """Estimate token count from *text* and upsert today's usage row.
+
+        We use a simple 4-chars-per-token heuristic.  No Bedrock SDK changes
+        are required and the estimate is consistent across all call sites.
+        """
+        estimated_tokens = max(1, len(text) // _CHARS_PER_TOKEN)
+        today = self._today_utc()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_token_usage (user_id, usage_date, tokens_used)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id, usage_date)
+                    DO UPDATE SET tokens_used = user_token_usage.tokens_used + EXCLUDED.tokens_used
+                    """,
+                    (user_id, today, estimated_tokens),
+                )
+            conn.commit()
+
+    def set_cooldown(self, user_id: str) -> datetime:
+        """Start a cooldown window for *user_id* and return the cooldown_until timestamp."""
+        cooldown_until = datetime.now(timezone.utc) + timedelta(hours=_DEFAULT_COOLDOWN_HOURS)
+        today = self._today_utc()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_token_usage (user_id, usage_date, tokens_used, cooldown_until)
+                    VALUES (%s, %s, 0, %s)
+                    ON CONFLICT (user_id, usage_date)
+                    DO UPDATE SET cooldown_until = EXCLUDED.cooldown_until
+                    """,
+                    (user_id, today, cooldown_until),
+                )
+            conn.commit()
+        return cooldown_until
+
+    def get_token_usage(self, user_id: str) -> dict[str, Any]:
+        """Return usage stats for the current UTC day.
+
+        Returns a dict with keys:
+          tokens_used, daily_limit, tokens_remaining,
+          cooldown_until (ISO string or None),
+          cooldown_remaining_seconds (int ≥ 0),
+          reset_at (ISO string — next midnight UTC)
+        """
+        today = self._today_utc()
+        daily_limit = _DEFAULT_DAILY_TOKEN_LIMIT
+        cooldown_hours = _DEFAULT_COOLDOWN_HOURS
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT tokens_used, cooldown_until
+                    FROM user_token_usage
+                    WHERE user_id = %s AND usage_date = %s
+                    """,
+                    (user_id, today),
+                )
+                row = cur.fetchone()
+
+        tokens_used = int(row["tokens_used"]) if row else 0
+        cooldown_until_raw = row["cooldown_until"] if row else None
+        now = datetime.now(timezone.utc)
+
+        # Ensure timezone-aware
+        if cooldown_until_raw and cooldown_until_raw.tzinfo is None:
+            cooldown_until_raw = cooldown_until_raw.replace(tzinfo=timezone.utc)
+
+        cooldown_remaining_seconds = 0
+        cooldown_until_iso: str | None = None
+        if cooldown_until_raw and cooldown_until_raw > now:
+            cooldown_remaining_seconds = int((cooldown_until_raw - now).total_seconds())
+            cooldown_until_iso = cooldown_until_raw.isoformat()
+
+        # Next UTC midnight
+        tomorrow = (now.date() + timedelta(days=1))
+        reset_at = datetime(
+            tomorrow.year, tomorrow.month, tomorrow.day,
+            tzinfo=timezone.utc,
+        ).isoformat()
+
+        return {
+            "tokens_used": tokens_used,
+            "daily_limit": daily_limit,
+            "tokens_remaining": max(0, daily_limit - tokens_used),
+            "cooldown_until": cooldown_until_iso,
+            "cooldown_remaining_seconds": cooldown_remaining_seconds,
+            "cooldown_hours": cooldown_hours,
+            "reset_at": reset_at,
+        }
+
+    def check_and_enforce_limits(self, user_id: str) -> None:
+        """Raise HTTP 429 if the user is in cooldown or has exceeded the daily limit.
+
+        Call this at the start of every LLM-backed endpoint *before* invoking
+        the model.  If the user is within limits, this is a no-op.
+        """
+        from fastapi import HTTPException  # local import avoids circular deps
+
+        stats = self.get_token_usage(user_id)
+
+        # Active cooldown takes priority
+        if stats["cooldown_remaining_seconds"] > 0:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Daily token limit reached. Please wait for the cooldown to expire.",
+                    "cooldown_remaining_seconds": stats["cooldown_remaining_seconds"],
+                    "cooldown_until": stats["cooldown_until"],
+                    "daily_limit_exceeded": True,
+                },
+            )
+
+        # Daily limit exceeded — start cooldown
+        if stats["tokens_used"] >= stats["daily_limit"]:
+            cooldown_until = self.set_cooldown(user_id)
+            remaining = int((cooldown_until - datetime.now(timezone.utc)).total_seconds())
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Daily token limit reached. A cooldown period has started.",
+                    "cooldown_remaining_seconds": remaining,
+                    "cooldown_until": cooldown_until.isoformat(),
+                    "daily_limit_exceeded": True,
+                },
+            )
 
 
 db_client = DBClient()
