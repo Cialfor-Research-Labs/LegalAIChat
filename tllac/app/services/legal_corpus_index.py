@@ -13,8 +13,14 @@ import re
 import sqlite3
 from typing import Callable, Iterator
 
-import ijson
-from ijson.common import JSONError
+try:
+    import ijson
+    from ijson.common import JSONError
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    ijson = None
+
+    class JSONError(ValueError):
+        pass
 
 
 SCHEMA_VERSION = "2"
@@ -30,6 +36,11 @@ _STOP_WORDS = {
     "may", "not", "of", "on", "or", "shall", "she", "that", "the", "their",
     "this", "to", "was", "were", "what", "when", "where", "which", "who",
     "will", "with", "would", "you", "your",
+}
+_ACT_ALIAS_HINTS = {
+    "bns": ("bns", "bharatiya nyaya sanhita", "bharatiya nyay sanhita", "ipc"),
+    "bnss": ("bnss", "bharatiya nagarik suraksha sanhita", "crpc"),
+    "bsa": ("bsa", "bharatiya sakshya adhiniyam", "bharatiya sakshya", "indian evidence act"),
 }
 
 
@@ -103,6 +114,15 @@ def _weighted_terms(record: dict[str, object]) -> Counter[str]:
 
 
 def _iter_json_records(path: Path) -> Iterator[object]:
+    if ijson is None:
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, list):
+            yield from data
+        else:
+            raise JSONError("Expected top-level JSON array")
+        return
+
     with path.open("rb") as handle:
         yield from ijson.items(handle, "item")
 
@@ -154,12 +174,98 @@ def _compact_metadata(record: dict[str, object]) -> str:
     fields = {
         key: record.get(key)
         for key in (
-            "jurisdiction", "domain", "citations", "precedents", "statutes",
-            "legal_issues", "holding", "petition_numbers", "entities",
+            "act_key",
+            "act_name",
+            "jurisdiction",
+            "domain",
+            "chapter",
+            "part",
+            "section_number",
+            "article_number",
+            "rules",
+            "schedule",
+            "version",
+            "citations",
+            "precedents",
+            "statutes",
+            "legal_issues",
+            "holding",
+            "petition_numbers",
+            "entities",
         )
         if record.get(key) not in (None, "", [], {})
     }
     return json.dumps(fields, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _normalize_metadata_text(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _build_query_filters(query: str) -> dict[str, list[str]]:
+    compact = _normalize_metadata_text(query)
+    filters: dict[str, list[str]] = {"acts": [], "sections": [], "articles": [], "titles": []}
+
+    section_terms = sorted(set(re.findall(r"\b(?:section|sec\.?|s\.)\s*(\d+[a-z]?(?:\(\d+\))?)\b", compact)))
+    section_terms.extend(
+        term
+        for term in re.findall(r"\b\d+[a-z]?(?:\(\d+\))?\b", compact)
+        if term not in section_terms
+    )
+    if section_terms:
+        filters["sections"].extend(sorted(set(section_terms)))
+
+    article_terms = sorted(set(re.findall(r"\b(?:article|art\.?)\s*(\d+[a-z]?)\b", compact)))
+    if article_terms:
+        filters["articles"].extend(article_terms)
+
+    for act_key, aliases in _ACT_ALIAS_HINTS.items():
+        if any(alias in compact for alias in aliases):
+            filters["acts"].append(act_key)
+
+    if "supreme court" in compact:
+        filters["titles"].append("supreme court")
+    if "high court" in compact:
+        filters["titles"].append("high court")
+
+    return filters
+
+
+def _build_metadata_clauses(filters: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    clauses: list[str] = []
+    params: list[str] = []
+
+    acts = [item for item in filters.get("acts", []) if item]
+    if acts:
+        act_clause = " OR ".join("(LOWER(d.metadata_json) LIKE ? OR LOWER(d.title) LIKE ?)" for _ in acts)
+        clauses.append(f"({act_clause})")
+        for act in acts:
+            like = f"%{act}%"
+            params.extend([like, like])
+
+    sections = [item for item in filters.get("sections", []) if item]
+    if sections:
+        section_clause = " OR ".join("(LOWER(d.section_name) LIKE ? OR LOWER(d.metadata_json) LIKE ?)" for _ in sections)
+        clauses.append(f"({section_clause})")
+        for section in sections:
+            like = f"%{section}%"
+            params.extend([like, like])
+
+    articles = [item for item in filters.get("articles", []) if item]
+    if articles:
+        article_clause = " OR ".join("(LOWER(d.section_name) LIKE ? OR LOWER(d.metadata_json) LIKE ?)" for _ in articles)
+        clauses.append(f"({article_clause})")
+        for article in articles:
+            like = f"%{article}%"
+            params.extend([like, like])
+
+    titles = [item for item in filters.get("titles", []) if item]
+    if titles:
+        title_clause = " OR ".join("LOWER(d.title) LIKE ?" for _ in titles)
+        clauses.append(f"({title_clause})")
+        params.extend([f"%{title}%" for title in titles])
+
+    return clauses, params
 
 
 def build_corpus_index(
@@ -203,12 +309,33 @@ def build_corpus_index(
                             messages.append(f"{json_path}: record {records_seen} is not an object")
                             continue
                         record = raw_record
-                        chunk_id = str(record.get("chunk_id") or "").strip()
+                        chunk_id = str(
+                            record.get("chunk_id")
+                            or record.get("document_id")
+                            or f"{record.get('act_key', '')}_{record.get('section_number', '')}"
+                        ).strip()
+
                         chunk_text = str(record.get("chunk_text") or "").strip()
-                        if not chunk_id or not chunk_text:
-                            records_skipped += 1
-                            messages.append(f"{json_path}: skipped record without chunk_id or chunk_text")
-                            continue
+
+                        # Fallback for statute_sections.json and similarly shaped records.
+                        if not chunk_text:
+                            parts = [
+                                record.get("act_name", ""),
+                                record.get("section", ""),
+                                record.get("title", ""),
+                                record.get("description", ""),
+                                record.get("punishment", ""),
+                                record.get("keywords", ""),
+                            ]
+                            chunk_text = "\n".join(
+                                str(part).strip()
+                                for part in parts
+                                if part and str(part).strip()
+                            )
+
+                        record = dict(record)
+                        record["chunk_id"] = chunk_id
+                        record["chunk_text"] = chunk_text
                         weighted_terms = _weighted_terms(record)
                         if not weighted_terms:
                             records_skipped += 1
@@ -328,12 +455,21 @@ class LegalCorpusIndex:
         except sqlite3.Error:
             return False
 
-    def search(self, query: str, authority_type: str, *, limit: int, candidate_limit: int) -> list[CorpusSearchHit]:
+    def search(
+        self,
+        query: str,
+        authority_type: str,
+        *,
+        limit: int,
+        candidate_limit: int,
+        filters: dict[str, list[str]] | None = None,
+    ) -> list[CorpusSearchHit]:
         if limit <= 0 or authority_type not in {"statute", "case"}:
             return []
         query_terms = sorted(set(tokenize_for_index(query)))
         if not query_terms:
             return []
+        active_filters = filters or _build_query_filters(query)
 
         uri = f"file:{self.path.resolve()}?mode=ro"
         with closing(sqlite3.connect(uri, uri=True)) as connection:
@@ -362,13 +498,20 @@ class LegalCorpusIndex:
                 return []
 
             term_placeholders = ",".join("?" for _ in ranked_terms)
+            filter_clauses, filter_params = _build_metadata_clauses(active_filters)
+            where_clauses = ["p.authority_type = ?", f"p.term IN ({term_placeholders})"]
+            params: list[object] = [authority_type, *ranked_terms]
+            if filter_clauses:
+                where_clauses.extend(filter_clauses)
+                params.extend(filter_params)
             rows = connection.execute(
                 f"""
-                SELECT term, document_id, weighted_tf
+                SELECT p.term, p.document_id, p.weighted_tf
                 FROM postings p
-                WHERE authority_type = ? AND term IN ({term_placeholders})
+                JOIN documents d ON d.id = p.document_id
+                WHERE {" AND ".join(where_clauses)}
                 """,
-                (authority_type, *ranked_terms),
+                params,
             )
             scores: dict[int, float] = {}
             frequencies: dict[int, dict[str, float]] = {}
@@ -417,6 +560,12 @@ class LegalCorpusIndex:
                 )
                 score += inverse_frequency * (term_frequency * (k1 + 1.0)) / denominator
             searchable = f"{title} {section} {text}".lower()
+            if active_filters.get("acts") and any(act in searchable for act in active_filters["acts"]):
+                score += 4.0
+            if active_filters.get("sections") and any(section_term in searchable for section_term in active_filters["sections"]):
+                score += 6.0
+            if active_filters.get("articles") and any(article in searchable for article in active_filters["articles"]):
+                score += 5.0
             if authority_type == "case" and "supreme court" in str(court).lower():
                 score += 1.5
             if section_terms and any(

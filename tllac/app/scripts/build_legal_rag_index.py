@@ -35,6 +35,19 @@ def main() -> int:
         help="Destination SQLite index path",
     )
     args = parser.parse_args()
+
+    corpus_dirs = [
+        args.corpus_root / "json_judgements",
+        args.corpus_root / "json_judgements_files",
+        args.corpus_root / "json_law_files",
+    ]
+    if not any(path.is_dir() for path in corpus_dirs):
+        print(
+            "No raw corpus directories were found under the configured corpus root. "
+            "Skipping index build and keeping the bundled curated corpus only."
+        )
+        return 0
+
     diagnostics: list[str] = []
     stats = build_corpus_index(
         args.corpus_root,

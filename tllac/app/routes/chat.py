@@ -11,13 +11,14 @@ Response:
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 import logging
+import os
 import re
 
 from ..db.db_client import db_client
 from ..services.auth_service import get_current_user
 from ..services.bedrock_llm_service import generate_response
 from ..services.chat_grounding_service import sanitize_grounded_response
-from ..services.legal_framework import build_lawyer_ai_framework_context
+from ..services.legal_framework import build_lawyer_ai_framework_context, classify_domains
 from ..services.legal_rag_service import (
     build_legal_rag_context_from_result,
     build_relevant_laws_note_from_result,
@@ -427,6 +428,65 @@ def _should_append_source_note(text: str) -> bool:
     return any(marker in normalized for marker in (" section ", "section ", "bns", "bnss", "bsa"))
 
 
+def _is_model_unavailable_response(text: str) -> bool:
+    normalized = _normalize_query(text).lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "temporarily unavailable",
+            "upstream service error",
+            "could not authenticate with the configured ai provider",
+            "did not return a response",
+        )
+    )
+
+
+def _build_domain_fallback_response(query: str, rag_result) -> str:
+    domains = classify_domains(query)
+    primary_domain = domains[0].domain if domains else ""
+
+    if primary_domain == "Employment law":
+        lines = [
+            "Your question appears to be an employment-law issue in India.",
+            "Termination usually depends on the employment contract, the employee category, and the applicable state Shops and Establishments law or labour law framework.",
+            "If the employee is a workman or the dispute is industrial in nature, the Industrial Disputes Act, 1947 may be relevant.",
+            "If the issue involves unpaid salary, notice pay, gratuity, PF, or other statutory dues, those claims should be checked separately.",
+            "If the termination followed harassment or retaliation, the POSH framework or internal complaint process may also matter.",
+            "Practical next steps: preserve the appointment letter, termination email or letter, salary slips, attendance records, and HR correspondence.",
+            "If you want, share your state, your role title, and whether the employer gave notice or reasons so the answer can be narrowed safely.",
+        ]
+        return " ".join(lines)
+
+    if primary_domain == "Contract/civil":
+        return (
+            "This looks like a contract or civil dispute. "
+            "The most relevant legal position usually depends on the agreement terms, notice clauses, payment records, and any breach evidence. "
+            "Preserve the contract, emails, invoices, payment proof, and any legal notice. "
+            "If you want, share the contract type and the exact breach so the applicable remedy can be narrowed."
+        )
+
+    if primary_domain == "Motor accident/insurance":
+        return (
+            "This looks like a motor accident and compensation issue. "
+            "The key documents are the FIR, medical records, vehicle details, insurance policy, and income proof. "
+            "The Motor Vehicles Act, 1988 and the accident facts will usually determine the next step. "
+            "If you want, share whether the claim is against the driver, insurer, or both."
+        )
+
+    if rag_result.statute_matches or rag_result.case_matches:
+        return (
+            "The retrieved legal documents do not contain sufficient information to answer this question accurately."
+        )
+
+    return (
+        "The retrieved legal documents do not contain sufficient information to answer this question accurately."
+    )
+
+
+def _allow_online_context() -> bool:
+    return os.getenv("LEGAL_RAG_ALLOW_ONLINE_CONTEXT", "false").strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _build_follow_up_fallback_response(*, original_legal_issue: str, latest_reply: str) -> str:
     lowered = _normalize_query(latest_reply).lower()
 
@@ -572,14 +632,27 @@ async def chat_endpoint(
 
     rag_result = retrieve_legal_rag_result(rag_query) if is_valid else retrieve_legal_rag_result("")
     rag_context = "" if not is_valid else build_legal_rag_context_from_result(rag_result)
-    online_research_context = (
-        "" if is_general_explanation else build_online_legal_research_context(session_legal_context)
-    )
+    min_confidence = float(os.getenv("LEGAL_RAG_MIN_RESPONSE_CONFIDENCE", "0.25"))
+    has_support = bool(rag_result.statute_matches or rag_result.case_matches)
+    weak_retrieval = (not is_valid) or (not has_support) or rag_result.confidence < min_confidence
+    retrieval_support_limited = weak_retrieval and has_support
+
+    online_research_context = ""
+    if _allow_online_context() and not is_general_explanation:
+        online_research_context = build_online_legal_research_context(session_legal_context)
+
     model_query = _build_safe_chat_prompt(
         base_prompt=model_query,
         rag_context="" if is_general_explanation else rag_context,
         online_context=online_research_context,
     )
+    if retrieval_support_limited:
+        model_query = (
+            "The retrieved legal authorities are only partially sufficient. "
+            "Answer carefully and do not invent any section, act, article, or case that is not supported below. "
+            "If the exact provision is uncertain, say that verification is needed.\n\n"
+            f"{model_query}"
+        )
 
     if full_prior_history and not is_general_explanation:
         user_timeline = _build_user_timeline(full_prior_history, query)
@@ -610,19 +683,35 @@ async def chat_endpoint(
             original_legal_issue=original_legal_issue,
             latest_reply=query,
         )
+    elif _is_model_unavailable_response(response_text):
+        response_text = _build_domain_fallback_response(query, rag_result)
 
     response_text = sanitize_grounded_response(
         response_text,
         current_query=rag_query,
         rag_result=rag_result,
     )
+    if weak_retrieval and not has_support:
+        response_text = (
+            "The retrieved legal documents do not contain sufficient information to answer this question accurately."
+        )
+    elif retrieval_support_limited and "Verification Note:" not in response_text:
+        response_text = (
+            f"{response_text.rstrip()}\n\n"
+            "Verification Note: The retrieved legal authorities only partially support this answer, so the exact statutory provision should be verified from the retrieved documents or the current bare act."
+        )
 
     relevant_laws_note = build_relevant_laws_note_from_result(rag_result)
-    if relevant_laws_note and "Relevant Laws:" not in response_text:
+    if (
+        relevant_laws_note
+        and "Relevant Laws:" not in response_text
+        and not _is_model_unavailable_response(response_text)
+        and rag_result.confidence >= min_confidence
+    ):
         response_text = f"{response_text.rstrip()}\n\n{relevant_laws_note}"
 
     source_note = ""
-    if _should_append_source_note(response_text):
+    if _should_append_source_note(response_text) and rag_result.confidence >= min_confidence:
         source_note = build_legal_rag_source_note_from_result(rag_result)
     if source_note:
         response_text = f"{response_text.rstrip()}\n\n{source_note}"
