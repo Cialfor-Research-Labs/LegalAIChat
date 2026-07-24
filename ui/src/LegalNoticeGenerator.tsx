@@ -52,14 +52,34 @@ function downloadNoticeTxt(notice: string) {
 }
 
 /**
+ * Normalize a notice line that the LLM may have emitted with space-padded
+ * multi-column alignment (e.g. "Adv.          Neha          Singh").
+ *
+ * In the web app such lines are rendered with white-space:pre-wrap inside a
+ * narrow panel so they soft-wrap and look fine. In a Word document on a full
+ * A4 page the spaces spread the words far apart. We detect lines that contain
+ * two or more consecutive spaces and collapse each run of multiple spaces
+ * down to a single space so the text reads naturally in a proportional font.
+ *
+ * Lines that are genuinely wide (e.g. the body paragraphs) rarely contain
+ * runs of multiple spaces, so collapsing only affects the padded header lines.
+ */
+function normalizeNoticeLine(line: string): string {
+  // If the line has 2+ consecutive spaces it was space-padded for columns.
+  // Collapse every run of 2+ spaces to a single space.
+  if (/  /.test(line)) {
+    return line.replace(/ {2,}/g, ' ').trim();
+  }
+  return line;
+}
+
+/**
  * Convert plain-text legal notice to a Word-compatible HTML document.
  *
- * The legal notice uses space-based column alignment (e.g. lawyer header block).
- * To preserve this faithfully in Word, we render the entire document in a
- * monospace font (Courier New) so every character occupies the same width —
- * matching the browser's `white-space: pre-wrap` rendering. Each line is
- * wrapped in a <p> with no extra margin; blank lines produce an empty <p>
- * that Word treats as a paragraph break (spacing).
+ * Uses Times New Roman with proper paragraph spacing. Lines that contain
+ * space-padded multi-column alignment (LLM letterhead artefacts) are
+ * normalised to single-column text so they render correctly on a full-width
+ * A4 page in a proportional font.
  */
 function downloadNoticeDoc(notice: string) {
   const escapeHtml = (str: string) =>
@@ -69,19 +89,39 @@ function downloadNoticeDoc(notice: string) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  // Convert each line to a <p>. Empty lines become an empty <p> which Word
-  // renders as a blank paragraph (paragraph spacing). This preserves both
-  // the monospace column alignment and the visual blank-line gaps.
-  const lines = notice
+  const rawLines = notice
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .split('\n');
 
-  const paragraphs = lines
-    .map((line) => {
-      const escaped = escapeHtml(line.trimEnd());
-      // Use &nbsp; for empty lines so Word creates a real blank paragraph
-      return `<p>${escaped || '&nbsp;'}</p>`;
+  // Group consecutive non-blank lines into paragraph blocks separated by
+  // blank lines. Each block becomes one <p> with <br> between its lines.
+  const blocks: string[][] = [];
+  let current: string[] = [];
+
+  for (const raw of rawLines) {
+    const normalized = normalizeNoticeLine(raw);
+    if (normalized === '') {
+      if (current.length > 0) {
+        blocks.push(current);
+        current = [];
+      }
+      // Push an empty block to preserve blank-line spacing
+      blocks.push([]);
+    } else {
+      current.push(normalized);
+    }
+  }
+  if (current.length > 0) blocks.push(current);
+
+  const paragraphs = blocks
+    .map((block) => {
+      if (block.length === 0) {
+        // Blank paragraph for spacing
+        return '<p>&nbsp;</p>';
+      }
+      const html = block.map((line) => escapeHtml(line)).join('<br>');
+      return `<p>${html}</p>`;
     })
     .join('\n');
 
@@ -107,15 +147,14 @@ function downloadNoticeDoc(notice: string) {
       margin: 2.54cm 2.54cm 2.54cm 2.54cm;
     }
     body {
-      font-family: "Courier New", Courier, monospace;
-      font-size: 10.5pt;
-      line-height: 1.4;
+      font-family: "Times New Roman", Times, serif;
+      font-size: 12pt;
+      line-height: 1.6;
       color: #000000;
     }
     p {
-      margin: 0;
+      margin: 0 0 6pt 0;
       padding: 0;
-      white-space: pre;
     }
   </style>
 </head>
