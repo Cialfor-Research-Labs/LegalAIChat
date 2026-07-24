@@ -54,9 +54,12 @@ function downloadNoticeTxt(notice: string) {
 /**
  * Convert plain-text legal notice to a Word-compatible HTML document.
  *
- * Word interprets HTML files saved as .doc. We use proper <p> elements so
- * each paragraph becomes a distinct Word paragraph with correct indentation
- * and spacing — unlike white-space:pre-wrap which Word ignores in .doc mode.
+ * The legal notice uses space-based column alignment (e.g. lawyer header block).
+ * To preserve this faithfully in Word, we render the entire document in a
+ * monospace font (Courier New) so every character occupies the same width —
+ * matching the browser's `white-space: pre-wrap` rendering. Each line is
+ * wrapped in a <p> with no extra margin; blank lines produce an empty <p>
+ * that Word treats as a paragraph break (spacing).
  */
 function downloadNoticeDoc(notice: string) {
   const escapeHtml = (str: string) =>
@@ -66,16 +69,19 @@ function downloadNoticeDoc(notice: string) {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  // Split on blank lines to identify paragraph groups, then split further on
-  // single newlines within a group and join with <br> so the internal line
-  // breaks inside a block (like the address lines) are preserved.
-  const paragraphs = notice
-    .split(/\n{2,}/)
-    .map((block) => {
-      const lines = block
-        .split('\n')
-        .map((line) => escapeHtml(line.trimEnd()));
-      return `<p>${lines.join('<br>')}</p>`;
+  // Convert each line to a <p>. Empty lines become an empty <p> which Word
+  // renders as a blank paragraph (paragraph spacing). This preserves both
+  // the monospace column alignment and the visual blank-line gaps.
+  const lines = notice
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  const paragraphs = lines
+    .map((line) => {
+      const escaped = escapeHtml(line.trimEnd());
+      // Use &nbsp; for empty lines so Word creates a real blank paragraph
+      return `<p>${escaped || '&nbsp;'}</p>`;
     })
     .join('\n');
 
@@ -101,14 +107,15 @@ function downloadNoticeDoc(notice: string) {
       margin: 2.54cm 2.54cm 2.54cm 2.54cm;
     }
     body {
-      font-family: "Times New Roman", Times, serif;
-      font-size: 12pt;
-      line-height: 1.6;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 10.5pt;
+      line-height: 1.4;
       color: #000000;
     }
     p {
-      margin: 0 0 10pt 0;
-      text-align: justify;
+      margin: 0;
+      padding: 0;
+      white-space: pre;
     }
   </style>
 </head>

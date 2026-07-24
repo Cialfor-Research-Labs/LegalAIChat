@@ -175,20 +175,49 @@ function downloadDocumentTxt(document: string) {
   downloadBlob('document-draft.txt', document, 'text/plain;charset=utf-8');
 }
 
-function downloadDocumentDoc(document: string) {
+function downloadDocumentDoc(documentText: string) {
+  // Apply the same line-break preservation used in the preview so that
+  // ReactMarkdown generates <br> elements for single-newline breaks inside
+  // paragraphs (markdown requires two trailing spaces for <br>).
+  const processedText = preserveDocumentLineBreaks(documentText);
   const previewHtml = renderToStaticMarkup(
-    <ReactMarkdown>{preserveDocumentLineBreaks(document)}</ReactMarkdown>,
+    <ReactMarkdown>{processedText}</ReactMarkdown>,
   );
   const htmlDocument = `<!doctype html>
-<html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
   <head>
     <meta charset="utf-8" />
     <title>Document Draft</title>
+    <!--[if gte mso 9]><xml>
+      <w:WordDocument>
+        <w:View>Print</w:View>
+        <w:Zoom>100</w:Zoom>
+        <w:DoNotOptimizeForBrowser/>
+      </w:WordDocument>
+    </xml><![endif]-->
+    <style>
+      @page { size: A4; margin: 2.54cm 2.54cm 2.54cm 2.54cm; }
+      body {
+        font-family: 'Times New Roman', Times, serif;
+        font-size: 12pt;
+        line-height: 1.6;
+        color: #111827;
+      }
+      p { margin: 0 0 8pt 0; text-align: justify; }
+      h1 { font-size: 16pt; font-weight: bold; margin: 14pt 0 6pt 0; }
+      h2 { font-size: 14pt; font-weight: bold; margin: 12pt 0 4pt 0; }
+      h3 { font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0; }
+      ul, ol { margin: 0 0 8pt 0; padding-left: 24pt; }
+      li { margin-bottom: 4pt; }
+      strong { font-weight: bold; }
+      em { font-style: italic; }
+      hr { border: none; border-top: 1px solid #999; margin: 12pt 0; }
+    </style>
   </head>
-  <body style="font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; color: #111827; margin: 36pt;">
-    <div style="white-space: pre-wrap;">
-      ${previewHtml}
-    </div>
+  <body>
+    ${previewHtml}
   </body>
 </html>`;
   downloadBlob('document-draft.doc', htmlDocument, 'application/msword');
