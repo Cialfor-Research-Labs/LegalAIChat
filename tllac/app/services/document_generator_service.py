@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 
-from ..services.bedrock_llm_service import generate_response
+from ..services.bedrock_llm_service import generate_notice_response
 
 
 _FALLBACK_DOCUMENT_PROMPT = (
@@ -270,6 +270,7 @@ def generate_document(
         skill_name=skill_name,
         skill_prompt=skill_prompt,
     )
-    document_body = (generate_response(prompt) or "").rstrip()
+    system_prompt = _normalize_prompt(skill_prompt)
+    document_body = (generate_notice_response(prompt, system_prompt, apply_guardrails=False) or "").rstrip()
     signature_block = build_signature_block(structured_sections=structured_sections)
     return f"{document_body}{signature_block}".strip()
