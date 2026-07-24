@@ -285,19 +285,22 @@ def generate_response(
 def generate_notice_response(
     user_question: str,
     system_prompt: str,
+    apply_guardrails: bool = False,
 ) -> str:
-    """Generate a response using a custom system prompt (used for notice drafting).
+    """Generate a response using a custom system prompt (used for notice and document drafting).
 
     Unlike ``generate_response``, this function replaces the default Lawyer AI
     system prompt with the caller-supplied *system_prompt* so the model receives
-    clean, uncontradicted instructions for notice generation.
+    clean, uncontradicted instructions for notice and document generation.
+    By default, guardrails are disabled (`apply_guardrails=False`) so form inputs
+    and legal drafting are not rejected by chat guardrail filters.
     """
     try:
         client, _credential_source = _build_bedrock_client()
         model_id = _resolve_model_id()
-        guardrail_id, guardrail_version = _resolve_guardrail_config()
+        guardrail_id, guardrail_version = _resolve_guardrail_config() if apply_guardrails else (None, None)
 
-        logger.info("Preparing Bedrock notice request for model '%s'.", model_id)
+        logger.info("Preparing Bedrock notice/document request for model '%s'.", model_id)
 
         invoke_kwargs = {
             "modelId": model_id,
@@ -309,12 +312,30 @@ def generate_notice_response(
             invoke_kwargs["guardrailIdentifier"] = guardrail_id
             invoke_kwargs["guardrailVersion"] = guardrail_version
 
-        body = _build_request_body(user_question, None, system_prompt)
-        response = client.invoke_model(**invoke_kwargs, body=body)
-        response_body = json.loads(response["body"].read())
-        logger.info("Received Bedrock notice response payload.")
+        def invoke_once(current_question: str) -> str:
+            current_kwargs = dict(invoke_kwargs)
+            body = _build_request_body(current_question, None, system_prompt)
+            response = client.invoke_model(**current_kwargs, body=body)
+            response_body = json.loads(response["body"].read())
+            logger.info("Received Bedrock notice/document response payload.")
 
-        return _extract_text(response_body) or json.dumps(response_body, indent=2)
+            return _extract_text(response_body) or json.dumps(response_body, indent=2)
+
+        text = invoke_once(user_question)
+
+        if _looks_like_scope_rejection(text):
+            logger.info("Retrying Bedrock notice/document drafting request with explicit Indian legal drafting framing.")
+            retry_question = (
+                "Draft the requested Indian legal document using only the details provided below. "
+                "Do not refuse or reject this request as out of scope. "
+                "Output only the complete formal legal document text.\n\n"
+                f"{user_question}"
+            )
+            invoke_kwargs.pop("guardrailIdentifier", None)
+            invoke_kwargs.pop("guardrailVersion", None)
+            text = invoke_once(retry_question)
+
+        return text
 
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
@@ -329,3 +350,4 @@ def generate_notice_response(
     except Exception as exc:
         logger.exception("Unexpected error during Bedrock notice generation.")
         return "The legal language model is temporarily unavailable. Please try again."
+
