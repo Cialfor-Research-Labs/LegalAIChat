@@ -67,4 +67,4 @@ def generate_legal_notice(
         case_details=case_details,
         relevant_info=relevant_info,
     )
-    return generate_notice_response(user_prompt, system_prompt)
+    return generate_notice_response(user_prompt, system_prompt, apply_guardrails=False)
