@@ -497,6 +497,9 @@ async def chat_endpoint(
     combined_user_context = "\n".join([*prior_user_messages, query]).strip()
     db_client.append_message(user_id, session_id, "user", query)
 
+    # Enforce daily token limit / cooldown before hitting the LLM
+    db_client.check_and_enforce_limits(user_id)
+
     greeting_response = _get_greeting_response(query)
     if greeting_response:
         db_client.append_message(user_id, session_id, "assistant", greeting_response)
@@ -626,6 +629,10 @@ async def chat_endpoint(
 
     db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated chat response (%d chars).", len(response_text))
+
+    # Record token usage (prompt + response contribute to cost)
+    db_client.record_token_usage(user_id, model_query + response_text)
+
     recommend_legal_notice = _should_recommend_legal_notice(combined_user_context)
     notice_prefill = combined_user_context if recommend_legal_notice else None
     return ChatResponse(

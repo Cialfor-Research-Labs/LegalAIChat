@@ -49,6 +49,11 @@ async def generate_legal_notice_endpoint(
     request: LegalNoticeRequest,
     current_user: dict[str, str] = Depends(get_current_user),
 ):
+    user_id = current_user["user_id"]
+
+    # Enforce daily token limit / cooldown before hitting the LLM
+    db_client.check_and_enforce_limits(user_id)
+
     notice = generate_legal_notice(
         client_details=request.client_details,
         lawyer_details=request.lawyer_details,
@@ -60,8 +65,11 @@ async def generate_legal_notice_endpoint(
     if not notice:
         raise HTTPException(status_code=502, detail="Legal notice generator returned an empty response.")
 
+    # Record token usage
+    db_client.record_token_usage(user_id, request.case_details + notice)
+
     history_id = db_client.save_generated_artifact(
-        user_id=current_user["user_id"],
+        user_id=user_id,
         artifact_type="legal_notice",
         title=request.case_details.strip()[:120] or "Legal Notice",
         input_payload=request.model_dump(),

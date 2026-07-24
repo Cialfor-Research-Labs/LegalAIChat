@@ -15,6 +15,8 @@ interface ChatPageProps {
   };
   onLogout: () => void;
   onGenerateLegalNotice?: (caseDetails: string) => void;
+  /** Called after each successful LLM response so the usage badge updates. */
+  onUsageBump?: () => void;
 }
 
 interface ChatSessionSummary {
@@ -50,14 +52,37 @@ async function requestChatResponse(
   recommendLegalNotice: boolean;
   noticePrefill: string | null;
 }> {
-  const data = await requestWithFallback<ChatResponsePayload>('/chat', () => ({
+  const url = '/chat';
+  const init = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authToken}`,
     },
     body: JSON.stringify({ query, session_id: sessionId || null }),
-  }));
+  };
+
+  // Use fetch directly so we can inspect the status code for 429.
+  let rawResponse: Response | null = null;
+  try {
+    rawResponse = await fetch(url, init);
+  } catch {
+    // network error — fall through to requestWithFallback below
+  }
+
+  if (rawResponse && rawResponse.status === 429) {
+    let cooldownSeconds = 0;
+    try {
+      const body = await rawResponse.json();
+      cooldownSeconds = body?.detail?.cooldown_remaining_seconds ?? 0;
+    } catch { /* ignore */ }
+    const hours = Math.ceil(cooldownSeconds / 3600);
+    throw new Error(
+      `Daily token limit reached. Chat will be available again in approximately ${hours} hour${hours !== 1 ? 's' : ''}. The countdown is shown in the header.`,
+    );
+  }
+
+  const data = await requestWithFallback<ChatResponsePayload>('/chat', () => init);
 
   const responseText = typeof data?.response === 'string' ? data.response.trim() : '';
   if (!responseText) {
@@ -78,6 +103,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   user,
   onLogout,
   onGenerateLegalNotice,
+  onUsageBump,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -186,6 +212,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
         setActiveSessionId(returnedSessionId);
       }
       await loadSessions();
+      onUsageBump?.();
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Unknown backend error';
       responseText = `The trained legal chat backend is unavailable right now.\n\nDetails: ${reason}`;

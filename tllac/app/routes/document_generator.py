@@ -59,7 +59,10 @@ async def generate_document_endpoint(
     request: DocumentGeneratorRequest,
     current_user: dict[str, str] = Depends(get_current_user),
 ):
-    _ = current_user
+    user_id = current_user["user_id"]
+
+    # Enforce daily token limit / cooldown before hitting the LLM
+    db_client.check_and_enforce_limits(user_id)
 
     document = generate_document(
         document_type=request.document_type,
@@ -88,8 +91,11 @@ async def generate_document_endpoint(
     if not document:
         raise HTTPException(status_code=502, detail="Document generator returned an empty response.")
 
+    # Record token usage
+    db_client.record_token_usage(user_id, request.case_details + document)
+
     history_id = db_client.save_generated_artifact(
-        user_id=current_user["user_id"],
+        user_id=user_id,
         artifact_type="document_generator",
         title=request.document_type_label.strip() or request.document_type.strip(),
         input_payload=request.model_dump(),
