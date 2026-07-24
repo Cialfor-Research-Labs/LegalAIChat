@@ -17,8 +17,12 @@ _ACT_CITATION_PATTERN = re.compile(
     r"\b(?:bns|bnss|bsa|ipc|crpc|cpc|mva|motor vehicles act|information technology act|it act|consumer protection act|specific relief act|contract act|constitution of india|articles? of the constitution)\b",
     re.I,
 )
-_UNSUPPORTED_SECTION_PLACEHOLDER = "the exact current statutory provision should be verified from the statute text"
-_UNSUPPORTED_ACT_PLACEHOLDER = "the exact applicable statute should be verified from the retrieved documents"
+_UNSUPPORTED_SECTION_PLACEHOLDER = "the relevant provision"
+_UNSUPPORTED_ACT_PLACEHOLDER = "the relevant statute"
+_FINAL_VERIFICATION_NOTE = (
+    "Note: This summary is based on the available legal corpus. "
+    "Please refer to the official statute for authoritative legal interpretation."
+)
 
 
 @dataclass(frozen=True)
@@ -115,26 +119,29 @@ def _neutralize_unsupported_act_citations(text: str, policy: GroundingPolicy) ->
 
 
 def _append_grounding_note(text: str, *, cite_warning: bool, weak_grounding: bool) -> str:
-    notes: list[str] = []
-    normalized = text.lower()
-
-    if cite_warning and "exact section should be verified" not in normalized:
-        notes.append(
-            "Verification Note: Exact section numbers or case citations not supported by the retrieved authorities have been generalized and should be verified from the relevant statute or authoritative source."
-        )
-    if weak_grounding and "source support is limited" not in normalized:
-        notes.append(
-            "Verification Note: Source support is limited for this query, so the answer stays at a general legal-guidance level and avoids unsupported statutory details."
-        )
-
-    if not notes:
+    if not (cite_warning or weak_grounding):
         return text.strip()
-
-    return f"{text.rstrip()}\n\n" + "\n".join(notes)
+    normalized = text.lower()
+    if _FINAL_VERIFICATION_NOTE.lower() in normalized:
+        return text.strip()
+    return f"{text.rstrip()}\n\n{_FINAL_VERIFICATION_NOTE}"
 
 
 def _cleanup_placeholder_phrases(text: str) -> str:
     cleaned = text
+    cleaned = re.sub(r"(?im)^\s*verification note:\s*.*(?:\n|$)", "", cleaned)
+    cleaned = re.sub(
+        re.escape("the exact current statutory provision should be verified from the statute text"),
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(
+        re.escape("the exact applicable statute should be verified from the retrieved documents"),
+        "",
+        cleaned,
+        flags=re.I,
+    )
     cleaned = re.sub(
         re.escape("the relevant section of the applicable statute"),
         _UNSUPPORTED_SECTION_PLACEHOLDER,
@@ -260,6 +267,7 @@ def sanitize_grounded_response(
     sanitized_text = _restore_markdown_emphasis(sanitized_text)
     sanitized_text = _restore_response_formatting(sanitized_text)
     sanitized_text = _restore_markdown_emphasis(sanitized_text)
+    sanitized_text = re.sub(r"\n{3,}", "\n\n", sanitized_text).strip()
 
     return _append_grounding_note(
         sanitized_text,
