@@ -195,13 +195,15 @@ export const vakalatnamaFieldGroups: DocumentFieldGroup[] = [
     text('client_contact', 'Client Contact', 'Phone or email'),
   ),
   courtGroup(
-    text('matter_title', 'Matter Title', 'Case title / subject matter', true),
-    text('forum_name', 'Court / Forum', 'Court / tribunal / authority', true),
+    text('forum_name', 'Court / Forum', 'e.g. IN THE COURT OF PRINCIPAL DISTRICT JUDGE, DELHI', true),
+    text('case_number', 'Suit / Appeal No.', 'e.g. Suit No. 102 of 2024'),
+    text('jurisdiction_year', 'Jurisdiction / Year', 'e.g. CIVIL JURISDICTION OF 2024'),
   ),
-  counterpartyGroup(text('opposite_party_name', 'Opposite Party', 'Opposite party name or title')),
+  counterpartyGroup(text('opposite_party_name', 'Opposite Party (Defendant/Respondent/Accused)', 'Opposite party name or title')),
   signatureGroup(
     text('advocate_name', 'Advocate Name', 'Name of advocate', true),
     text('advocate_enrolment', 'Enrollment Number', 'Bar enrollment number'),
+    text('execution_date', 'Execution Date', 'e.g. 27th Day of July, 2024'),
     text('witness_names', 'Witness Names', 'Names of witnesses if known'),
   ),
 ];
