@@ -179,10 +179,44 @@ function downloadDocumentTxt(document: string) {
 }
 
 function downloadDocumentDoc(documentText: string) {
-  const processedText = preserveDocumentLineBreaks(documentText);
-  const previewHtml = renderToStaticMarkup(
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>{processedText}</ReactMarkdown>,
-  );
+  const escapeHtml = (str: string) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const rawLines = documentText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  const blocks: string[][] = [];
+  let current: string[] = [];
+
+  for (const raw of rawLines) {
+    if (raw.trim() === '') {
+      if (current.length > 0) {
+        blocks.push(current);
+        current = [];
+      }
+      blocks.push([]);
+    } else {
+      current.push(raw);
+    }
+  }
+  if (current.length > 0) blocks.push(current);
+
+  const paragraphs = blocks
+    .map((block) => {
+      if (block.length === 0) {
+        return '<p>&nbsp;</p>';
+      }
+      const html = block.map((line) => escapeHtml(line)).join('<br>');
+      return `<p>${html}</p>`;
+    })
+    .join('\n');
+
   const htmlDocument = `<!doctype html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
       xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -200,27 +234,16 @@ function downloadDocumentDoc(documentText: string) {
     <style>
       @page { size: A4; margin: 2.54cm 2.54cm 2.54cm 2.54cm; }
       body {
-        font-family: 'Times New Roman', Times, serif;
-        font-size: 12pt;
+        font-family: 'Calibri', 'Arial', 'Helvetica', sans-serif;
+        font-size: 11pt;
         line-height: 1.5;
         color: #000000;
       }
-      p { margin: 0 0 8pt 0; text-align: justify; }
-      h1, h2, h3, h4 { text-align: center; font-weight: bold; margin: 12pt 0 6pt 0; }
-      table { border-collapse: collapse; width: 100%; margin: 12pt 0; }
-      td, th { padding: 6pt 8pt; vertical-align: top; text-align: left; }
-      pre { font-family: 'Courier New', Courier, monospace; font-size: 10pt; white-space: pre-wrap; word-wrap: break-word; border: 1px solid #000; padding: 10pt; background: #fafafa; margin: 12pt 0; }
-      code { font-family: 'Courier New', Courier, monospace; font-size: 10pt; }
-      blockquote { border: 1px solid #000; padding: 12pt; margin: 12pt 0; text-align: center; }
-      ul, ol { margin: 0 0 8pt 0; padding-left: 24pt; }
-      li { margin-bottom: 4pt; }
-      strong { font-weight: bold; }
-      em { font-style: italic; }
-      hr { border: none; border-top: 1px solid #000; margin: 12pt 0; }
+      p { margin: 0 0 6pt 0; text-align: justify; }
     </style>
   </head>
   <body>
-    ${previewHtml}
+    ${paragraphs}
   </body>
 </html>`;
   downloadBlob('document-draft.doc', htmlDocument, 'application/msword');
