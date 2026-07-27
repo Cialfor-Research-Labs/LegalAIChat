@@ -212,7 +212,9 @@ function downloadDocumentDoc(documentText: string) {
       if (block.length === 0) {
         return '<p>&nbsp;</p>';
       }
-      const html = block.map((line) => escapeHtml(line)).join('<br>');
+      const html = block
+        .map((line) => escapeHtml(line).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>'))
+        .join('<br>');
       return `<p>${html}</p>`;
     })
     .join('\n');
