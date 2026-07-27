@@ -271,6 +271,8 @@ def generate_document(
         skill_prompt=skill_prompt,
     )
     system_prompt = _normalize_prompt(skill_prompt)
-    document_body = (generate_notice_response(prompt, system_prompt, apply_guardrails=False) or "").rstrip()
+    document_body_text, tokens_used = generate_notice_response(prompt, system_prompt, apply_guardrails=False)
+    document_body = (document_body_text or "").rstrip()
     signature_block = build_signature_block(structured_sections=structured_sections)
-    return f"{document_body}{signature_block}".strip()
+    return f"{document_body}{signature_block}".strip(), tokens_used
+

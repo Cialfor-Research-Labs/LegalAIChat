@@ -58,7 +58,8 @@ def generate_legal_notice(
     case_details: str,
     recipient_details: str = "",
     relevant_info: str = "",
-) -> str:
+) -> tuple[str, int]:
+    """Generate and return (notice_text, tokens_used)."""
     system_prompt = get_notice_generator_prompt()
     user_prompt = build_legal_notice_prompt(
         client_details=client_details,
@@ -68,3 +69,4 @@ def generate_legal_notice(
         relevant_info=relevant_info,
     )
     return generate_notice_response(user_prompt, system_prompt, apply_guardrails=False)
+
