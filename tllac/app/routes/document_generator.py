@@ -64,7 +64,7 @@ async def generate_document_endpoint(
     # Enforce daily token limit / cooldown before hitting the LLM
     db_client.check_and_enforce_limits(user_id)
 
-    document = generate_document(
+    document, tokens_used = generate_document(
         document_type=request.document_type,
         document_type_label=request.document_type_label,
         party_details=request.party_details,
@@ -91,8 +91,8 @@ async def generate_document_endpoint(
     if not document:
         raise HTTPException(status_code=502, detail="Document generator returned an empty response.")
 
-    # Record token usage
-    db_client.record_token_usage(user_id, request.case_details + document)
+    # Record exact token usage reported by Bedrock
+    db_client.record_token_usage(user_id, tokens_used)
 
     history_id = db_client.save_generated_artifact(
         user_id=user_id,
