@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BookOpen, ChevronDown, Download, FileText, Loader2, LogOut, PanelLeft, Plus, Shield, Wand2, X } from 'lucide-react';
 import { DOCUMENT_SKILLS, getDocumentSkillByType } from './documentSkills';
@@ -151,7 +152,9 @@ function preserveDocumentLineBreaks(document: string) {
         trimmed === '___' ||
         trimmed === '***' ||
         /^#{1,6}\s/.test(trimmed) ||
-        /^(\d+\.|[-*+])\s/.test(trimmed)
+        /^(\d+\.|[-*+])\s/.test(trimmed) ||
+        trimmed.startsWith('|') ||
+        trimmed.startsWith('+')
       ) {
         return line;
       }
@@ -176,12 +179,9 @@ function downloadDocumentTxt(document: string) {
 }
 
 function downloadDocumentDoc(documentText: string) {
-  // Apply the same line-break preservation used in the preview so that
-  // ReactMarkdown generates <br> elements for single-newline breaks inside
-  // paragraphs (markdown requires two trailing spaces for <br>).
   const processedText = preserveDocumentLineBreaks(documentText);
   const previewHtml = renderToStaticMarkup(
-    <ReactMarkdown>{processedText}</ReactMarkdown>,
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{processedText}</ReactMarkdown>,
   );
   const htmlDocument = `<!doctype html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -202,18 +202,21 @@ function downloadDocumentDoc(documentText: string) {
       body {
         font-family: 'Times New Roman', Times, serif;
         font-size: 12pt;
-        line-height: 1.6;
-        color: #111827;
+        line-height: 1.5;
+        color: #000000;
       }
       p { margin: 0 0 8pt 0; text-align: justify; }
-      h1 { font-size: 16pt; font-weight: bold; margin: 14pt 0 6pt 0; }
-      h2 { font-size: 14pt; font-weight: bold; margin: 12pt 0 4pt 0; }
-      h3 { font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0; }
+      h1, h2, h3, h4 { text-align: center; font-weight: bold; margin: 12pt 0 6pt 0; }
+      table { border-collapse: collapse; width: 100%; margin: 12pt 0; }
+      td, th { padding: 6pt 8pt; vertical-align: top; text-align: left; }
+      pre { font-family: 'Courier New', Courier, monospace; font-size: 10pt; white-space: pre-wrap; word-wrap: break-word; border: 1px solid #000; padding: 10pt; background: #fafafa; margin: 12pt 0; }
+      code { font-family: 'Courier New', Courier, monospace; font-size: 10pt; }
+      blockquote { border: 1px solid #000; padding: 12pt; margin: 12pt 0; text-align: center; }
       ul, ol { margin: 0 0 8pt 0; padding-left: 24pt; }
       li { margin-bottom: 4pt; }
       strong { font-weight: bold; }
       em { font-style: italic; }
-      hr { border: none; border-top: 1px solid #999; margin: 12pt 0; }
+      hr { border: none; border-top: 1px solid #000; margin: 12pt 0; }
     </style>
   </head>
   <body>
@@ -690,7 +693,7 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
               </div>
             ) : draft?.document ? (
               <div className="prose prose-sm max-w-none whitespace-pre-wrap dark:prose-invert prose-headings:text-on-surface prose-p:my-0 prose-p:leading-relaxed prose-li:my-1">
-                <ReactMarkdown>{previewDocument}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewDocument}</ReactMarkdown>
               </div>
             ) : (
               <div className="flex h-full min-h-[420px] flex-col items-center justify-center text-center text-on-surface-variant">
