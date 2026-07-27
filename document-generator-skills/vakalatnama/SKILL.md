@@ -1,6 +1,6 @@
 ---
 name: indian-vakalatnama-generator
-description: Generate a vakalatnama format for Indian litigation matching the exact statutory court format with precise clauses, header stamp box, cause title, authority clauses, execution date, witness identification, and advocate signature blocks.
+description: Generate a vakalatnama format for Indian litigation matching the exact court form format with precise dotted lines, right-aligned stamps, and authentic court layout.
 ---
 
 # Indian Vakalatnama
@@ -16,36 +16,28 @@ Use this skill when `documentType` indicates vakalatnama, memo of appearance aut
 
 ## Output rules
 
-1. Draft ONLY the Vakalatnama in the exact statutory format below.
-2. Fill all placeholders (`{...}`) using the inputs provided. If a detail is not provided, use clean blank underlines (e.g. `....................`).
-3. Do NOT add conversational preamble, commentary, meta-instructions, or closing text.
-4. Maintain exact clause phrasing, paragraphing, and signature layout.
+1. Output ONLY the Vakalatnama text directly. Do NOT wrap in markdown code blocks (` ``` `) or markdown table borders (`|`).
+2. Use raw text with dotted lines (`..................................................................`) for placeholders and fill them in where values are provided.
+3. Keep the exact legal wording, paragraphing, and signature positions.
 
-## Mandatory Format Template
-
-```
-+-----------------------------------------------------------------------------------+
-|                                                                                   |
-|                      [ SPACE FOR COURT FEE / POWER STAMP ]                        |
-|                                                                                   |
-+-----------------------------------------------------------------------------------+
+## Format Template
 
 IN THE COURT OF {forum_name}
-Suit/Appeal No. {case_number}                              JURISDICTION OF {jurisdiction_year}
+
+Suit/Appeal No. {case_number}                                        JURISDICTION OF {jurisdiction_year}
 
 In re:-
 
-{executant_name}                                    ... Plaintiff(s) or Petitioner(s)
-                                                        Appellant(s) Complainant(s)
+{executant_name}                                        ... Plaintiff(s) or Petitioner(s)
+                                                            Appellant(s)    Complainant(s)
 
 VERSUS
 
-{opposite_party_name}                               ... Defendant (s)/ Respondent(s) / Accused
+{opposite_party_name}                                   ... Defendant (s)/ Respondent(s) / Accused
 
 Know all to whom these Present shall come that I/we {executant_name}, {executant_address}
 
-The above named {executant_name} do hereby appoint {advocate_name}, {advocate_enrolment}
-(herein after called the advocate/s) to be my / our Advocate in the above – noted case authorize him:-
+The above named {executant_name} do hereby appoint {advocate_name}, {advocate_enrolment} (herein after called the advocate/s) to be my / our Advocate in the above – noted case authorize him:-
 
 To act, appear and plead in the above-noted case in this court or in any other court in which the same may be tried or heard and also in the appellate court including High Court subject to payment of fees separately for each court by me/us.
 
@@ -72,14 +64,11 @@ And I/we undersigned do hereby agree that in the event of the whole or part of t
 IN WITNESS WHERE OF I/We do hereunto set my/our hand to these presents the contents of which have been understood by me/us on this {execution_date} Accepted subject to the terms of the fees.
 
 
-|                               |                               |                               |
-|-------------------------------|-------------------------------|-------------------------------|
-| **Advocate**                  | **Client**                    | **Client**                    |
-| (Signature)                   | (Signature)                   | (Signature)                   |
+Advocate                                                Client                                                Client
 
 
 I Identify the Signature/Thumb Impression of Below Mentioned Person,
 
 Signed in My Presence. The Client.
-```
+
 
