@@ -54,7 +54,7 @@ async def generate_legal_notice_endpoint(
     # Enforce daily token limit / cooldown before hitting the LLM
     db_client.check_and_enforce_limits(user_id)
 
-    notice = generate_legal_notice(
+    notice, tokens_used = generate_legal_notice(
         client_details=request.client_details,
         lawyer_details=request.lawyer_details,
         recipient_details=request.recipient_details,
@@ -65,8 +65,8 @@ async def generate_legal_notice_endpoint(
     if not notice:
         raise HTTPException(status_code=502, detail="Legal notice generator returned an empty response.")
 
-    # Record token usage
-    db_client.record_token_usage(user_id, request.case_details + notice)
+    # Record exact token usage reported by Bedrock
+    db_client.record_token_usage(user_id, tokens_used)
 
     history_id = db_client.save_generated_artifact(
         user_id=user_id,

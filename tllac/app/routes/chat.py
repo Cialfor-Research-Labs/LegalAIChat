@@ -672,7 +672,7 @@ async def chat_endpoint(
             f"New follow-up to answer:\n{query}\n\n"
             f"Legal analysis scaffold for this turn:\n{model_query}"
         )
-    response_text = generate_response(
+    response_text, tokens_used = generate_response(
         model_query,
         conversation_history=conversation_history,
     )
@@ -714,8 +714,8 @@ async def chat_endpoint(
     db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated chat response (%d chars).", len(response_text))
 
-    # Record token usage (prompt + response contribute to cost)
-    db_client.record_token_usage(user_id, model_query + response_text)
+    # Record exact token usage reported by Bedrock
+    db_client.record_token_usage(user_id, tokens_used)
 
     recommend_legal_notice = _should_recommend_legal_notice(combined_user_context)
     notice_prefill = combined_user_context if recommend_legal_notice else None

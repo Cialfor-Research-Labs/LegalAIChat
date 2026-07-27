@@ -667,13 +667,17 @@ class DBClient:
         """Return the current UTC date as an ISO date string YYYY-MM-DD."""
         return datetime.now(timezone.utc).date().isoformat()
 
-    def record_token_usage(self, user_id: str, text: str) -> None:
-        """Estimate token count from *text* and upsert today's usage row.
+    def record_token_usage(self, user_id: str, tokens: int) -> None:
+        """Upsert *tokens* (exact Bedrock input + output token count) for today.
 
-        We use a simple 4-chars-per-token heuristic.  No Bedrock SDK changes
-        are required and the estimate is consistent across all call sites.
+        Callers must pass the real token count returned by the Bedrock service
+        layer (``generate_response`` / ``generate_notice_response``).  The old
+        char-based heuristic has been removed; the Bedrock response body
+        contains authoritative ``usage.input_tokens`` and ``usage.output_tokens``
+        values that are used instead.
         """
-        estimated_tokens = max(1, len(text) // _CHARS_PER_TOKEN)
+        if tokens <= 0:
+            return
         today = self._today_utc()
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -684,7 +688,7 @@ class DBClient:
                     ON CONFLICT (user_id, usage_date)
                     DO UPDATE SET tokens_used = user_token_usage.tokens_used + EXCLUDED.tokens_used
                     """,
-                    (user_id, today, estimated_tokens),
+                    (user_id, today, tokens),
                 )
             conn.commit()
 
