@@ -676,8 +676,21 @@ export const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Right section: Profile / Avatar Settings Dropdown */}
-          <div className="relative flex items-center justify-end shrink-0" ref={profileMenuRef}>
+          {/* Right section: Theme toggle + Profile / Avatar Settings Dropdown */}
+          <div className="relative flex items-center justify-end gap-2 shrink-0" ref={profileMenuRef}>
+            {/* Quick theme toggle: cycles dark → light → system */}
+            <button
+              type="button"
+              aria-label={`Switch theme (current: ${userSettings.theme})`}
+              onClick={() => {
+                const next: UserSettings['theme'] = userSettings.theme === 'dark' ? 'light' : userSettings.theme === 'light' ? 'system' : 'dark';
+                updateUserSettings('theme', next);
+              }}
+              title={`Theme: ${userSettings.theme} — click to switch`}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low text-on-surface-variant transition hover:border-primary/40 hover:bg-surface-container hover:text-primary active:scale-95"
+            >
+              {resolvedTheme === 'dark' ? <Moon size={15} /> : <Sun size={15} />}
+            </button>
             <button
               type="button"
               aria-label="User profile and settings"
@@ -891,8 +904,9 @@ export const App: React.FC = () => {
       {/* Settings & Profile Modals */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className={`relative w-full rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-2xl text-on-surface space-y-4 ${activeModal === 'settings' ? 'max-w-4xl' : 'max-w-md'}`}>
-            <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
+          <div className={`relative flex w-full flex-col rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl text-on-surface ${activeModal === 'settings' ? 'max-w-4xl min-h-[480px] max-h-[min(88vh,680px)]' : 'max-w-md min-h-[280px] max-h-[min(80vh,520px)]'}`}>
+            {/* Modal header — always visible */}
+            <div className="flex shrink-0 items-center justify-between border-b border-outline-variant/20 px-6 py-4">
               <div className="flex items-center gap-2 font-semibold text-lg">
                 {activeModal === 'profile' && <User className="text-primary" size={20} />}
                 {activeModal === 'settings' && <Settings className="text-primary" size={20} />}
@@ -909,6 +923,8 @@ export const App: React.FC = () => {
                 <X size={18} />
               </button>
             </div>
+            {/* Modal scrollable body */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-4">
 
             {activeModal === 'profile' && (
               <div className="space-y-3 text-sm">
@@ -939,8 +955,8 @@ export const App: React.FC = () => {
             )}
 
             {activeModal === 'settings' && (
-              <div className="grid min-h-[390px] gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
-                <nav className="flex max-h-[56vh] gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
+              <div className="grid gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
+                <nav className="flex gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
                   {([
                     ['general', 'General', Settings],
                     ['notifications', 'Notifications', Bell],
@@ -1175,15 +1191,16 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setActiveModal(null)}
-                className="neutral-button w-full justify-center text-xs"
-              >
-                Close
-              </button>
-            </div>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="neutral-button w-full justify-center text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </div>{/* end scrollable body */}
           </div>
         </div>
       )}
