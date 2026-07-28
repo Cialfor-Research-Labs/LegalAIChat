@@ -9,6 +9,9 @@ interface ChatContainerProps {
   isSessionLoading?: boolean;
   onSendMessage: (content: string) => void;
   onGenerateLegalNotice?: (caseDetails: string) => void;
+  keyboardShortcuts?: boolean;
+  showSuggestedPrompts?: boolean;
+  enableDictation?: boolean;
 }
 
 export const ChatContainer: React.FC<ChatContainerProps> = ({
@@ -17,6 +20,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
   isSessionLoading = false,
   onSendMessage,
   onGenerateLegalNotice,
+  keyboardShortcuts = true,
+  showSuggestedPrompts = true,
+  enableDictation = true,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -55,7 +61,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                   Ask anything — I’ll provide structured answers based on internal knowledge.
                 </p>
                 
-                <div className="w-full max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+                {showSuggestedPrompts ? <div className="w-full max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
                   {suggestedPrompts.map((prompt, index) => (
                     <button
                       key={index}
@@ -65,7 +71,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                       {prompt}
                     </button>
                   ))}
-                </div>
+                </div> : null}
               </div>
             ) : (
               <div className="pb-4">
@@ -102,7 +108,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         </div>
       </div>
       <div className="shrink-0">
-        <ChatInput onSend={onSendMessage} disabled={isLoading} />
+        <ChatInput onSend={onSendMessage} disabled={isLoading} keyboardShortcuts={keyboardShortcuts} enableDictation={enableDictation} />
       </div>
     </div>
   );
