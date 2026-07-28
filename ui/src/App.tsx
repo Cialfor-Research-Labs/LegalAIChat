@@ -1,16 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bell,
   Check,
   ChevronRight,
+  CircleHelp,
+  Database,
+  Laptop,
+  Mail,
+  Monitor,
   FilePenLine,
   FileText,
   HelpCircle,
   LogOut,
   MessageSquare,
+  Moon,
   Plus,
+  ShieldCheck,
   Settings,
   Sliders,
   Sparkles,
+  Sun,
   User,
   X,
 } from 'lucide-react';
@@ -24,6 +33,51 @@ import { TokenUsageBadge } from './TokenUsageBadge';
 
 type ActiveTab = 'chat' | 'legal-notice' | 'document-generator';
 type AuthMode = 'login' | 'register';
+type SettingsSection =
+  | 'general'
+  | 'notifications'
+  | 'personalization'
+  | 'plugins'
+  | 'voice'
+  | 'billing'
+  | 'data-controls'
+  | 'storage'
+  | 'safety'
+  | 'security'
+  | 'parental-controls'
+  | 'trusted-contact'
+  | 'account'
+  | 'keyboard';
+
+type NotificationCategory = 'codex' | 'groupChat' | 'marketing' | 'personalizedTips' | 'projects' | 'responses' | 'tasks' | 'usage';
+type NotificationPreference = { push?: boolean; email?: boolean };
+type Personality = 'Default' | 'Professional' | 'Friendly' | 'Candid' | 'Quirky' | 'Efficient' | 'Cynical' | 'Nerdy';
+type CharacteristicLevel = 'Less' | 'Default' | 'More';
+
+interface UserSettings {
+  theme: 'dark' | 'light' | 'system';
+  contrast: 'system' | 'standard' | 'high';
+  accentColor: 'default' | 'pink' | 'blue' | 'purple' | 'yellow' | 'green' | 'orange';
+  language: string;
+  jurisdiction: string;
+  higherIntelligence: boolean;
+  enableDictation: boolean;
+  keyboardShortcuts: boolean;
+  notifications: Record<NotificationCategory, NotificationPreference>;
+  baseStyle: Personality;
+  warmth: CharacteristicLevel;
+  enthusiasm: CharacteristicLevel;
+  headersAndLists: CharacteristicLevel;
+  emoji: CharacteristicLevel;
+  fastAnswers: boolean;
+  customInstructions: string;
+  nickname: string;
+  occupation: string;
+  moreAboutYou: string;
+  memoryEnabled: boolean;
+  showSuggestedPrompts: boolean;
+  saveChatHistory: boolean;
+}
 
 interface AuthUser {
   user_id: string;
@@ -59,7 +113,59 @@ interface GeneratorHistoryItem {
 const LEGAL_NOTICE_PROXY_URL = '/tllac-api/legal-notice/generate';
 const LOCAL_LEGAL_NOTICE_URL = 'http://127.0.0.1:9001/legal-notice/generate';
 const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
+const USER_SETTINGS_STORAGE_KEY = 'tllac_user_settings';
 const DOCUMENT_GENERATOR_PATH = '/document-generator/generate';
+
+const defaultUserSettings: UserSettings = {
+  theme: 'dark',
+  contrast: 'system',
+  accentColor: 'default',
+  language: 'English (India)',
+  jurisdiction: 'India',
+  higherIntelligence: true,
+  enableDictation: true,
+  keyboardShortcuts: true,
+  notifications: {
+    codex: { push: true },
+    groupChat: { push: true },
+    marketing: { push: false, email: false },
+    personalizedTips: { push: true, email: false },
+    projects: { email: true },
+    responses: { push: true },
+    tasks: { push: true, email: true },
+    usage: { push: true, email: true },
+  },
+  baseStyle: 'Default',
+  warmth: 'Default',
+  enthusiasm: 'Default',
+  headersAndLists: 'Default',
+  emoji: 'Default',
+  fastAnswers: true,
+  customInstructions: '',
+  nickname: '',
+  occupation: '',
+  moreAboutYou: '',
+  memoryEnabled: true,
+  showSuggestedPrompts: true,
+  saveChatHistory: true,
+};
+
+function readUserSettings(): UserSettings {
+  try {
+    const stored = window.localStorage.getItem(USER_SETTINGS_STORAGE_KEY);
+    if (!stored) {
+      return defaultUserSettings;
+    }
+    const settings = { ...defaultUserSettings, ...JSON.parse(stored) };
+    const supportedAccents: UserSettings['accentColor'][] = ['default', 'pink', 'blue', 'purple', 'yellow', 'green', 'orange'];
+    if (!supportedAccents.includes(settings.accentColor)) {
+      settings.accentColor = 'default';
+    }
+    return settings;
+  } catch {
+    return defaultUserSettings;
+  }
+}
 
 function getHostBasedLegalNoticeUrl(): string {
   const { protocol, hostname } = window.location;
@@ -159,7 +265,53 @@ export const App: React.FC = () => {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isAccountSubMenuOpen, setIsAccountSubMenuOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<'profile' | 'settings' | 'personalization' | 'upgrade' | 'help' | null>(null);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSection>('general');
+  const [userSettings, setUserSettings] = useState<UserSettings>(readUserSettings);
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const resolvedTheme = userSettings.theme === 'system'
+    ? (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : userSettings.theme;
+
+  useEffect(() => {
+    window.localStorage.setItem(USER_SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
+  }, [userSettings]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.contrast = userSettings.contrast;
+    const accents: Record<UserSettings['accentColor'], string> = {
+      default: '#6366f1', pink: '#ec4899', blue: '#0ea5e9', purple: '#8b5cf6',
+      yellow: '#ca8a04', green: '#10b981', orange: '#f97316',
+    };
+    root.style.setProperty('--app-color-primary', accents[userSettings.accentColor]);
+    root.style.setProperty('--app-color-primary-container', `${accents[userSettings.accentColor]}33`);
+  }, [userSettings.accentColor, userSettings.contrast]);
+
+  useEffect(() => {
+    document.documentElement.lang = userSettings.language === 'Hindi' ? 'hi' : 'en';
+  }, [userSettings.language]);
+
+  const updateUserSettings = <Key extends keyof UserSettings>(key: Key, value: UserSettings[Key]) => {
+    setUserSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateNotificationPreference = (
+    category: NotificationCategory,
+    channel: keyof NotificationPreference,
+    enabled: boolean,
+  ) => {
+    setUserSettings((current) => ({
+      ...current,
+      notifications: {
+        ...current.notifications,
+        [category]: { ...current.notifications[category], [channel]: enabled },
+      },
+    }));
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -492,7 +644,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-surface font-body text-on-surface" data-theme="dark">
+    <div className="flex h-screen flex-col overflow-hidden bg-surface font-body text-on-surface" data-theme={resolvedTheme}>
       <div className="sticky top-0 z-40 border-b border-outline-variant/20 bg-surface-container">
         <div className="flex h-14 items-center justify-between px-4 md:px-6">
           {/* Left section: Email & Token Usage Badge */}
@@ -613,7 +765,8 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setActiveModal('personalization');
+                      setActiveSettingsSection('personalization');
+                      setActiveModal('settings');
                       setIsProfileMenuOpen(false);
                     }}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left font-medium text-on-surface hover:bg-surface-container-low transition"
@@ -637,6 +790,7 @@ export const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
+                      setActiveSettingsSection('general');
                       setActiveModal('settings');
                       setIsProfileMenuOpen(false);
                     }}
@@ -692,6 +846,17 @@ export const App: React.FC = () => {
             onLogout={handleLogout}
             onGenerateLegalNotice={generateNoticeFromChat}
             onUsageBump={bumpUsage}
+            keyboardShortcuts={userSettings.keyboardShortcuts}
+            showSuggestedPrompts={userSettings.showSuggestedPrompts}
+            enableDictation={userSettings.enableDictation}
+            personalization={{
+              baseStyle: userSettings.baseStyle, warmth: userSettings.warmth,
+              enthusiasm: userSettings.enthusiasm, headersAndLists: userSettings.headersAndLists,
+              emoji: userSettings.emoji, fastAnswers: userSettings.fastAnswers,
+              customInstructions: userSettings.customInstructions, nickname: userSettings.nickname,
+              occupation: userSettings.occupation, moreAboutYou: userSettings.moreAboutYou,
+              memoryEnabled: userSettings.memoryEnabled,
+            }}
           />
         ) : activeTab === 'legal-notice' ? (
           <LegalNoticeGenerator
@@ -726,7 +891,7 @@ export const App: React.FC = () => {
       {/* Settings & Profile Modals */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-2xl text-on-surface space-y-4">
+          <div className={`relative w-full rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-2xl text-on-surface space-y-4 ${activeModal === 'settings' ? 'max-w-4xl' : 'max-w-md'}`}>
             <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
               <div className="flex items-center gap-2 font-semibold text-lg">
                 {activeModal === 'profile' && <User className="text-primary" size={20} />}
@@ -774,25 +939,149 @@ export const App: React.FC = () => {
             )}
 
             {activeModal === 'settings' && (
-              <div className="space-y-4 text-sm">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-on-surface-variant">AI Intelligence Model</label>
-                  <div className="p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container-low text-xs font-medium">
-                    Amazon Bedrock (Mistral Large 3 Legal Model)
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-on-surface-variant">Legal Jurisdiction</label>
-                  <div className="p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container-low text-xs font-medium">
-                    Republic of India (BNS, BNSS, BSA & Statutory Frameworks)
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-on-surface-variant">Interface Theme</label>
-                  <div className="p-2.5 rounded-xl border border-outline-variant/30 bg-surface-container-low text-xs font-medium">
-                    Dark Mode (Active)
-                  </div>
-                </div>
+              <div className="grid min-h-[390px] gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
+                <nav className="flex max-h-[56vh] gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
+                  {[
+                    ['general', 'General', Settings],
+                    ['notifications', 'Notifications', Bell],
+                    ['personalization', 'Personalization', Sliders],
+                    ['plugins', 'Plugins', Sparkles],
+                    ['voice', 'Voice', MessageSquare],
+                    ['billing', 'Billing', FileText],
+                    ['data-controls', 'Data controls', ShieldCheck],
+                    ['storage', 'Storage', Database],
+                    ['safety', 'Safety', ShieldCheck],
+                    ['security', 'Security & login', ShieldCheck],
+                    ['parental-controls', 'Parental controls', User],
+                    ['trusted-contact', 'Trusted contact', User],
+                    ['account', 'Account', User],
+                    ['keyboard', 'Keyboard', Laptop],
+                  ].map(([id, label, Icon]) => {
+                    const isActive = activeSettingsSection === id;
+                    const SectionIcon = Icon as typeof Settings;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setActiveSettingsSection(id as SettingsSection)}
+                        className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${isActive ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'}`}
+                      >
+                        <SectionIcon size={16} />
+                        {label}
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                <section className="min-w-0 space-y-5">
+                  {activeSettingsSection === 'general' && (
+                    <>
+                      <div>
+                        <h2 className="text-base font-semibold">General</h2>
+                        <p className="mt-1 text-xs text-on-surface-variant">Set the defaults for your LAW LLM workspace.</p>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4">
+                          <div className="mb-3 flex items-center gap-2 font-medium"><Monitor size={16} className="text-primary" /> Appearance</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([['dark', 'Dark', Moon], ['light', 'Light', Sun], ['system', 'System', Laptop]] as const).map(([value, label, Icon]) => (
+                              <button key={value} type="button" onClick={() => updateUserSettings('theme', value)} className={`flex flex-col items-center gap-2 rounded-xl border px-3 py-3 text-xs font-medium transition ${userSettings.theme === value ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant hover:border-primary/40'}`}>
+                                <Icon size={16} />{label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <label className="block">
+                          <span className="mb-2 block text-xs font-semibold text-on-surface-variant">Contrast</span>
+                          <select value={userSettings.contrast} onChange={(event) => updateUserSettings('contrast', event.target.value as UserSettings['contrast'])} className="text-field py-2.5">
+                            <option value="system">System</option><option value="standard">Standard</option><option value="high">High</option>
+                          </select>
+                        </label>
+                        <div>
+                          <span className="mb-2 block text-xs font-semibold text-on-surface-variant">Accent color</span>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            {([['default', 'Default', 'bg-slate-400'], ['pink', 'Pink', 'bg-pink-500'], ['blue', 'Blue', 'bg-sky-500'], ['purple', 'Purple', 'bg-purple-500'], ['yellow', 'Yellow', 'bg-yellow-600'], ['green', 'Green', 'bg-emerald-500'], ['orange', 'Orange', 'bg-orange-500']] as const).map(([value, label, swatch]) => (
+                              <button key={value} type="button" onClick={() => updateUserSettings('accentColor', value)} className={`rounded-xl border px-2 py-2 text-xs transition ${userSettings.accentColor === value ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant'}`}><span className={`mr-1.5 inline-block h-2.5 w-2.5 rounded-full ${swatch}`} />{label}</button>
+                            ))}
+                          </div>
+                        </div>
+                        <label className="block">
+                          <span className="mb-2 block text-xs font-semibold text-on-surface-variant">Language</span>
+                          <select value={userSettings.language} onChange={(event) => updateUserSettings('language', event.target.value)} className="text-field py-2.5">
+                            <option>English (India)</option><option>Hindi</option><option>English (United Kingdom)</option>
+                          </select>
+                        </label>
+                        {([
+                          ['higherIntelligence', 'Higher intelligence', 'Automatically use a more capable response mode for complex questions.'],
+                          ['enableDictation', 'Enable dictation', 'Allow voice dictation in the chat composer when available.'],
+                        ] as const).map(([key, title, description]) => {
+                          const enabled = userSettings[key];
+                          return <div key={key} className="flex items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><div className="min-w-0 flex-1"><div className="font-medium">{title}</div><div className="mt-0.5 text-xs text-on-surface-variant">{description}</div></div><button type="button" role="switch" aria-checked={enabled} onClick={() => updateUserSettings(key, !enabled)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${enabled ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-6' : 'left-1'}`} /></button></div>;
+                        })}
+                        <label className="block">
+                          <span className="mb-2 block text-xs font-semibold text-on-surface-variant">Default legal jurisdiction</span>
+                          <select value={userSettings.jurisdiction} onChange={(event) => updateUserSettings('jurisdiction', event.target.value)} className="text-field py-2.5">
+                            <option>India</option><option>United Kingdom</option><option>United States</option>
+                          </select>
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {activeSettingsSection === 'notifications' && (
+                    <>
+                      <div><h2 className="text-base font-semibold">Notifications</h2><p className="mt-1 text-xs text-on-surface-variant">Choose how each type of workspace update reaches you.</p></div>
+                      <div className="divide-y divide-outline-variant/20 overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-low">
+                        {[
+                          ['codex', 'Codex', 'Activity and updates from your AI workspace.', ['push']],
+                          ['groupChat', 'Group chat', 'New messages and mentions in group conversations.', ['push']],
+                          ['marketing', 'Marketing', 'Product announcements and occasional offers.', ['push', 'email']],
+                          ['personalizedTips', 'Personalized tips', 'Helpful suggestions tailored to your workflow.', ['push', 'email']],
+                          ['projects', 'Projects', 'Project activity and collaboration updates.', ['email']],
+                          ['responses', 'Responses', 'When an assistant response or generation is ready.', ['push']],
+                          ['tasks', 'Tasks', 'Task assignments, reminders, and completions.', ['push', 'email']],
+                          ['usage', 'Usage', 'Token and workspace usage updates.', ['push', 'email']],
+                        ] as [NotificationCategory, string, string, (keyof NotificationPreference)[]][]).map(([category, title, description, channels]) => {
+                          return <div key={category} className="flex items-center gap-3 p-4"><Bell size={17} className="shrink-0 text-primary" /><div className="min-w-0 flex-1"><div className="font-medium">{title}</div><div className="mt-0.5 text-xs text-on-surface-variant">{description}</div></div><div className="flex shrink-0 items-center gap-3">{channels.map((channel) => { const enabled = Boolean(userSettings.notifications[category][channel]); return <label key={channel} className="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-variant"><span className="hidden sm:inline">{channel === 'push' ? 'Push' : 'Email'}</span><button type="button" aria-label={`${title} ${channel} notifications`} role="switch" aria-checked={enabled} onClick={() => updateNotificationPreference(category, channel, !enabled)} className={`relative h-5 w-9 rounded-full transition ${enabled ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-4' : 'left-0.5'}`} /></button></label>; })}</div></div>;
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {activeSettingsSection === 'keyboard' && (
+                    <>
+                      <div><h2 className="text-base font-semibold">Keyboard</h2><p className="mt-1 text-xs text-on-surface-variant">Control chat keyboard shortcuts.</p></div>
+                      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><div className="flex items-center gap-3"><Laptop size={18} className="text-primary" /><div className="flex-1"><div className="font-medium">Keyboard shortcuts</div><div className="mt-0.5 text-xs text-on-surface-variant">Use Enter to send and Shift + Enter for a new line.</div></div><button type="button" role="switch" aria-checked={userSettings.keyboardShortcuts} onClick={() => updateUserSettings('keyboardShortcuts', !userSettings.keyboardShortcuts)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${userSettings.keyboardShortcuts ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${userSettings.keyboardShortcuts ? 'left-6' : 'left-1'}`} /></button></div></div>
+                      <div className="overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-low text-xs"><div className="flex justify-between border-b border-outline-variant/20 px-4 py-3"><span>Send message</span><kbd className="rounded bg-surface-container-high px-2 py-0.5">Enter</kbd></div><div className="flex justify-between px-4 py-3"><span>New line</span><kbd className="rounded bg-surface-container-high px-2 py-0.5">Shift + Enter</kbd></div></div>
+                    </>
+                  )}
+
+                  {(['plugins', 'voice', 'billing', 'storage', 'safety', 'security', 'parental-controls', 'trusted-contact', 'account'] as SettingsSection[]).includes(activeSettingsSection) && (
+                    <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-5"><h2 className="text-base font-semibold">{({ plugins: 'Plugins', voice: 'Voice', billing: 'Billing', storage: 'Storage', safety: 'Safety', security: 'Security & login', 'parental-controls': 'Parental controls', 'trusted-contact': 'Trusted contact', account: 'Account' } as Partial<Record<SettingsSection, string>>)[activeSettingsSection]}</h2><p className="mt-2 text-xs leading-5 text-on-surface-variant">This area is ready for its workspace-specific controls. Your preferences are saved locally as soon as settings are changed.</p></div>
+                  )}
+
+                  {activeSettingsSection === 'personalization' && (
+                    <>
+                      <div><h2 className="text-base font-semibold">Personalization</h2><p className="mt-1 text-xs text-on-surface-variant">These preferences apply to new and ongoing chat responses.</p></div>
+                      <label className="block border-b border-outline-variant/20 pb-5"><span className="mb-1 block font-medium">Base style and tone</span><span className="mb-3 block text-xs text-on-surface-variant">Set the overall response personality.</span><select value={userSettings.baseStyle} onChange={(event) => updateUserSettings('baseStyle', event.target.value as Personality)} className="text-field py-2.5"><option>Default</option><option>Professional</option><option>Friendly</option><option>Candid</option><option>Quirky</option><option>Efficient</option><option>Cynical</option><option>Nerdy</option></select></label>
+                      <div className="border-b border-outline-variant/20 pb-4"><div className="mb-3"><div className="font-medium">Characteristics</div><div className="mt-1 text-xs text-on-surface-variant">Choose additional customizations on top of your base style and tone.</div></div><div className="space-y-3">{([
+                        ['warmth', 'Warm'], ['enthusiasm', 'Enthusiastic'], ['headersAndLists', 'Headers & Lists'], ['emoji', 'Emoji'],
+                      ] as const).map(([key, label]) => <label key={key} className="flex items-center justify-between gap-4"><span>{label}</span><select value={userSettings[key]} onChange={(event) => updateUserSettings(key, event.target.value as CharacteristicLevel)} className="w-28 rounded-xl border border-outline-variant/50 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"><option>Less</option><option>Default</option><option>More</option></select></label>)}</div></div>
+                      <div className="flex items-center gap-3 border-b border-outline-variant/20 pb-4"><div className="flex-1"><div className="font-medium">Fast answers</div><div className="mt-1 text-xs leading-5 text-on-surface-variant">Use concise general-knowledge answers when appropriate. These replies may not use your saved memory.</div></div><button type="button" role="switch" aria-checked={userSettings.fastAnswers} onClick={() => updateUserSettings('fastAnswers', !userSettings.fastAnswers)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${userSettings.fastAnswers ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${userSettings.fastAnswers ? 'left-6' : 'left-1'}`} /></button></div>
+                      <div className="space-y-4"><label className="block"><span className="mb-2 block font-medium">Custom instructions</span><textarea value={userSettings.customInstructions} onChange={(event) => updateUserSettings('customInstructions', event.target.value)} placeholder="Additional behavior, style, and tone preferences" className="text-field min-h-24 resize-y" /></label><div className="border-b border-outline-variant/20 pb-3 text-base font-semibold">About you</div><label className="block"><span className="mb-2 block font-medium">Nickname</span><input value={userSettings.nickname} onChange={(event) => updateUserSettings('nickname', event.target.value)} placeholder="What should LAW LLM call you?" className="text-field py-2.5" /></label><label className="block"><span className="mb-2 block font-medium">Occupation</span><input value={userSettings.occupation} onChange={(event) => updateUserSettings('occupation', event.target.value)} placeholder="Your profession or role" className="text-field py-2.5" /></label><label className="block"><span className="mb-2 block font-medium">More about you</span><textarea value={userSettings.moreAboutYou} onChange={(event) => updateUserSettings('moreAboutYou', event.target.value)} placeholder="Interests, values, or preferences to keep in mind" className="text-field min-h-20 resize-y" /></label></div>
+                      <div className="flex items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><CircleHelp size={18} className="text-primary" /><div className="flex-1"><div className="font-medium">Memory</div><div className="mt-0.5 text-xs text-on-surface-variant">Use your saved preferences to personalize future responses.</div></div><button type="button" role="switch" aria-checked={userSettings.memoryEnabled} onClick={() => updateUserSettings('memoryEnabled', !userSettings.memoryEnabled)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${userSettings.memoryEnabled ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${userSettings.memoryEnabled ? 'left-6' : 'left-1'}`} /></button></div>
+                      <div className="flex items-center gap-3 rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><CircleHelp size={18} className="text-primary" /><div className="flex-1"><div className="font-medium">Suggested prompts</div><div className="mt-0.5 text-xs text-on-surface-variant">Show starter questions when beginning a new chat.</div></div><button type="button" role="switch" aria-checked={userSettings.showSuggestedPrompts} onClick={() => updateUserSettings('showSuggestedPrompts', !userSettings.showSuggestedPrompts)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${userSettings.showSuggestedPrompts ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${userSettings.showSuggestedPrompts ? 'left-6' : 'left-1'}`} /></button></div>
+                    </>
+                  )}
+
+                  {activeSettingsSection === 'data-controls' && (
+                    <>
+                      <div><h2 className="text-base font-semibold">Data controls</h2><p className="mt-1 text-xs text-on-surface-variant">Manage how your workspace stores conversation history.</p></div>
+                      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><div className="flex items-start gap-3"><Database size={18} className="mt-0.5 text-primary" /><div className="flex-1"><div className="font-medium">Save chat history</div><div className="mt-0.5 text-xs leading-5 text-on-surface-variant">Keep new chats in your encrypted workspace so you can return to them later.</div></div><button type="button" role="switch" aria-checked={userSettings.saveChatHistory} onClick={() => updateUserSettings('saveChatHistory', !userSettings.saveChatHistory)} className={`relative h-6 w-11 shrink-0 rounded-full transition ${userSettings.saveChatHistory ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow-sm transition ${userSettings.saveChatHistory ? 'left-6' : 'left-1'}`} /></button></div></div>
+                      <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-low p-4"><div className="flex items-start gap-3"><ShieldCheck size={18} className="mt-0.5 text-primary" /><div><div className="font-medium">Your workspace privacy</div><div className="mt-0.5 text-xs leading-5 text-on-surface-variant">Your saved sessions remain account-scoped and available only after signing in.</div></div></div></div>
+                    </>
+                  )}
+                </section>
               </div>
             )}
 

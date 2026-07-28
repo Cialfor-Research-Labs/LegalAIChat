@@ -308,6 +308,16 @@
   }
 }
 
+:root[data-contrast="high"] {
+  --app-color-outline: rgba(148, 163, 184, 0.72);
+  --app-color-outline-variant: rgba(148, 163, 184, 0.48);
+}
+
+:root[data-theme="light"][data-contrast="high"] {
+  --app-color-outline: rgba(15, 23, 42, 0.58);
+  --app-color-outline-variant: rgba(15, 23, 42, 0.34);
+}
+
 @keyframes typing-caret-blink {
   0%,
   45% {
