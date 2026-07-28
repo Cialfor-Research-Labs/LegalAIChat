@@ -904,7 +904,7 @@ export const App: React.FC = () => {
       {/* Settings & Profile Modals */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className={`relative flex w-full flex-col rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl text-on-surface ${activeModal === 'settings' ? 'max-w-4xl max-h-[min(90vh,720px)]' : 'max-w-md max-h-[min(90vh,560px)]'}`}>
+          <div className={`relative flex w-full flex-col rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl text-on-surface ${activeModal === 'settings' ? 'max-w-4xl min-h-[480px] max-h-[min(88vh,680px)]' : 'max-w-md min-h-[280px] max-h-[min(80vh,520px)]'}`}>
             {/* Modal header — always visible */}
             <div className="flex shrink-0 items-center justify-between border-b border-outline-variant/20 px-6 py-4">
               <div className="flex items-center gap-2 font-semibold text-lg">
@@ -955,8 +955,8 @@ export const App: React.FC = () => {
             )}
 
             {activeModal === 'settings' && (
-              <div className="grid min-h-[390px] gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
-                <nav className="flex max-h-[56vh] gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
+              <div className="grid gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
+                <nav className="flex gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
                   {([
                     ['general', 'General', Settings],
                     ['notifications', 'Notifications', Bell],
