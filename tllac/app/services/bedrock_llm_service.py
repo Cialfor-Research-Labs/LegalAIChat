@@ -217,11 +217,22 @@ def _extract_token_count(response_body: dict, fallback_text: str = "") -> int:
     output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
 
     if input_tokens is not None and output_tokens is not None:
-        return max(1, int(input_tokens) + int(output_tokens))
+        total = max(1, int(input_tokens) + int(output_tokens))
+        logger.info(
+            "Bedrock token usage — input: %d, output: %d, total: %d",
+            int(input_tokens), int(output_tokens), total,
+        )
+        return total
 
     # Fallback: char/4 heuristic on the returned text only
-    logger.debug("Bedrock usage field missing; falling back to char/4 heuristic.")
-    return max(1, len(fallback_text) // 4)
+    fallback = max(1, len(fallback_text) // 4)
+    logger.warning(
+        "Bedrock usage field missing from response (keys: %s). "
+        "Falling back to char/4 heuristic → %d tokens.",
+        list(response_body.keys()),
+        fallback,
+    )
+    return fallback
 
 
 def _looks_like_scope_rejection(text: str) -> bool:
