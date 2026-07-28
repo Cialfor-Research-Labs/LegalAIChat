@@ -50,6 +50,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional chat session id for remembering previous messages.",
     )
+    personalization: dict[str, object] | None = Field(
+        default=None,
+        description="Optional response-style preferences selected in the workspace.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -646,6 +650,39 @@ async def chat_endpoint(
         rag_context="" if is_general_explanation else rag_context,
         online_context=online_research_context,
     )
+    preferences = request.personalization or {}
+    if preferences:
+        base_style = str(preferences.get("baseStyle", "Default"))
+        characteristics = ", ".join(
+            f"{label}: {preferences.get(key, 'Default')}"
+            for key, label in (
+                ("warmth", "warmth"),
+                ("enthusiasm", "enthusiasm"),
+                ("headersAndLists", "use of headings and lists"),
+                ("emoji", "emoji use"),
+            )
+        )
+        custom_instructions = str(preferences.get("customInstructions", "")).strip()[:1200]
+        memory_context = ""
+        if preferences.get("memoryEnabled", True):
+            profile = "; ".join(
+                item for item in (
+                    f"name: {str(preferences.get('nickname')).strip()}" if preferences.get("nickname") else "",
+                    f"occupation: {str(preferences.get('occupation')).strip()}" if preferences.get("occupation") else "",
+                    f"additional context: {str(preferences.get('moreAboutYou')).strip()}" if preferences.get("moreAboutYou") else "",
+                ) if item
+            )[:1200]
+            if profile:
+                memory_context = f" User profile context: {profile}."
+        model_query = (
+            "Apply these response presentation preferences when they do not conflict with the user's request, "
+            "legal accuracy, safety requirements, or the instructions above. Do not mention these preferences. "
+            f"Base style: {base_style}. Characteristics: {characteristics}. "
+            f"Fast answers: {'prefer concise direct answers' if preferences.get('fastAnswers', True) else 'prefer complete answers over speed'}."
+            f"{memory_context}"
+            f" Custom instructions: {custom_instructions or '[none]'}.\n\n"
+            f"{model_query}"
+        )
     if retrieval_support_limited:
         model_query = (
             "The retrieved legal authorities are only partially sufficient. "
