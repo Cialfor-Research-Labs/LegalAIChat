@@ -941,7 +941,7 @@ export const App: React.FC = () => {
             {activeModal === 'settings' && (
               <div className="grid min-h-[390px] gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
                 <nav className="flex max-h-[56vh] gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
-                  {[
+                  {([
                     ['general', 'General', Settings],
                     ['notifications', 'Notifications', Bell],
                     ['personalization', 'Personalization', Sliders],
@@ -956,17 +956,16 @@ export const App: React.FC = () => {
                     ['trusted-contact', 'Trusted contact', User],
                     ['account', 'Account', User],
                     ['keyboard', 'Keyboard', Laptop],
-                  ].map(([id, label, Icon]) => {
+                  ] as Array<[SettingsSection, string, React.ComponentType<{ size?: number }>]>).map(([id, label, Icon]) => {
                     const isActive = activeSettingsSection === id;
-                    const SectionIcon = Icon as typeof Settings;
                     return (
                       <button
                         key={id}
                         type="button"
-                        onClick={() => setActiveSettingsSection(id as SettingsSection)}
+                        onClick={() => setActiveSettingsSection(id)}
                         className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${isActive ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'}`}
                       >
-                        <SectionIcon size={16} />
+                        <Icon size={16} />
                         {label}
                       </button>
                     );
@@ -1030,20 +1029,57 @@ export const App: React.FC = () => {
 
                   {activeSettingsSection === 'notifications' && (
                     <>
-                      <div><h2 className="text-base font-semibold">Notifications</h2><p className="mt-1 text-xs text-on-surface-variant">Choose how each type of workspace update reaches you.</p></div>
+                      <div>
+                        <h2 className="text-base font-semibold">Notifications</h2>
+                        <p className="mt-1 text-xs text-on-surface-variant">Choose how each type of workspace update reaches you.</p>
+                      </div>
                       <div className="divide-y divide-outline-variant/20 overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-low">
-                        {[
-                          ['codex', 'Codex', 'Activity and updates from your AI workspace.', ['push']],
-                          ['groupChat', 'Group chat', 'New messages and mentions in group conversations.', ['push']],
-                          ['marketing', 'Marketing', 'Product announcements and occasional offers.', ['push', 'email']],
-                          ['personalizedTips', 'Personalized tips', 'Helpful suggestions tailored to your workflow.', ['push', 'email']],
-                          ['projects', 'Projects', 'Project activity and collaboration updates.', ['email']],
-                          ['responses', 'Responses', 'When an assistant response or generation is ready.', ['push']],
-                          ['tasks', 'Tasks', 'Task assignments, reminders, and completions.', ['push', 'email']],
-                          ['usage', 'Usage', 'Token and workspace usage updates.', ['push', 'email']],
-                        ] as [NotificationCategory, string, string, (keyof NotificationPreference)[]][]).map(([category, title, description, channels]) => {
-                          return <div key={category} className="flex items-center gap-3 p-4"><Bell size={17} className="shrink-0 text-primary" /><div className="min-w-0 flex-1"><div className="font-medium">{title}</div><div className="mt-0.5 text-xs text-on-surface-variant">{description}</div></div><div className="flex shrink-0 items-center gap-3">{channels.map((channel) => { const enabled = Boolean(userSettings.notifications[category][channel]); return <label key={channel} className="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-variant"><span className="hidden sm:inline">{channel === 'push' ? 'Push' : 'Email'}</span><button type="button" aria-label={`${title} ${channel} notifications`} role="switch" aria-checked={enabled} onClick={() => updateNotificationPreference(category, channel, !enabled)} className={`relative h-5 w-9 rounded-full transition ${enabled ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-4' : 'left-0.5'}`} /></button></label>; })}</div></div>;
-                        })}
+                        {(() => {
+                          const categories: Array<[NotificationCategory, string, string, Array<keyof NotificationPreference>]> = [
+                            ['codex', 'Codex', 'Activity and updates from your AI workspace.', ['push']],
+                            ['groupChat', 'Group chat', 'New messages and mentions in group conversations.', ['push']],
+                            ['marketing', 'Marketing', 'Product announcements and occasional offers.', ['push', 'email']],
+                            ['personalizedTips', 'Personalized tips', 'Helpful suggestions tailored to your workflow.', ['push', 'email']],
+                            ['projects', 'Projects', 'Project activity and collaboration updates.', ['email']],
+                            ['responses', 'Responses', 'When an assistant response or generation is ready.', ['push']],
+                            ['tasks', 'Tasks', 'Task assignments, reminders, and completions.', ['push', 'email']],
+                            ['usage', 'Usage', 'Token and workspace usage updates.', ['push', 'email']],
+                          ];
+                          return categories.map(([category, title, description, channels]) => {
+                            const enabled = (channel: keyof NotificationPreference) =>
+                              Boolean(userSettings.notifications[category][channel]);
+                            return (
+                              <div key={category} className="flex items-center gap-3 p-4">
+                                <Bell size={17} className="shrink-0 text-primary" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-medium">{title}</div>
+                                  <div className="mt-0.5 text-xs text-on-surface-variant">{description}</div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                  {channels.map((channel) => (
+                                    <label key={channel} className="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-variant">
+                                      <span className="hidden sm:inline">
+                                        {channel === 'push' ? 'Push' : 'Email'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        aria-label={`${title} ${channel} notifications`}
+                                        role="switch"
+                                        aria-checked={enabled(channel)}
+                                        onClick={() => updateNotificationPreference(category, channel, !enabled(channel))}
+                                        className={`relative h-5 w-9 rounded-full transition ${enabled(channel) ? 'bg-primary' : 'bg-outline-variant'}`}
+                                      >
+                                        <span
+                                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled(channel) ? 'left-4' : 'left-0.5'}`}
+                                        />
+                                      </button>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </>
                   )}
