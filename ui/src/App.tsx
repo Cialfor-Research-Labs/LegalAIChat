@@ -116,6 +116,17 @@ const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
 const USER_SETTINGS_STORAGE_KEY = 'tllac_user_settings';
 const DOCUMENT_GENERATOR_PATH = '/document-generator/generate';
 
+function getV1BetaUrl(): string {
+  const configuredUrl = import.meta.env.VITE_V1_BETA_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const hostname = window.location.hostname || '127.0.0.1';
+  return `${protocol}//${hostname}:3001`;
+}
+
 const defaultUserSettings: UserSettings = {
   theme: 'dark',
   contrast: 'system',
@@ -673,6 +684,15 @@ export const App: React.FC = () => {
               className={tabClass('document-generator')}
             >
               Document Generator
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open(getV1BetaUrl(), '_blank', 'noopener,noreferrer')}
+              className="ml-2 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-primary transition hover:border-primary/50 hover:bg-primary/15"
+              aria-label="Open V1 Beta in a new tab"
+              title="Open the isolated V1 Beta workspace"
+            >
+              v1
             </button>
           </div>
 

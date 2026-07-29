@@ -3,6 +3,7 @@
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;
   readonly VITE_TLLAC_API_URL?: string;
+  readonly VITE_V1_BETA_URL?: string;
 }
 
 interface ImportMeta {
