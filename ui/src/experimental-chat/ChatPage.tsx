@@ -17,6 +17,22 @@ interface ChatPageProps {
   onGenerateLegalNotice?: (caseDetails: string) => void;
   /** Called after each successful LLM response so the usage badge updates. */
   onUsageBump?: () => void;
+  keyboardShortcuts?: boolean;
+  showSuggestedPrompts?: boolean;
+  enableDictation?: boolean;
+  personalization?: {
+    baseStyle: string;
+    warmth: string;
+    enthusiasm: string;
+    headersAndLists: string;
+    emoji: string;
+    fastAnswers: boolean;
+    customInstructions: string;
+    nickname: string;
+    occupation: string;
+    moreAboutYou: string;
+    memoryEnabled: boolean;
+  };
 }
 
 interface ChatSessionSummary {
@@ -46,6 +62,7 @@ async function requestChatResponse(
   authToken: string,
   query: string,
   sessionId?: string | null,
+  personalization?: ChatPageProps['personalization'],
 ): Promise<{
   responseText: string;
   sessionId: string | null;
@@ -59,7 +76,7 @@ async function requestChatResponse(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ query, session_id: sessionId || null }),
+    body: JSON.stringify({ query, session_id: sessionId || null, personalization }),
   };
 
   // Use fetch directly so we can inspect the status code for 429.
@@ -104,6 +121,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   onLogout,
   onGenerateLegalNotice,
   onUsageBump,
+  keyboardShortcuts,
+  showSuggestedPrompts,
+  enableDictation,
+  personalization,
 }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -203,7 +224,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     let noticePrefill: string | null = null;
 
     try {
-      const result = await requestChatResponse(authToken, content, activeSessionId);
+      const result = await requestChatResponse(authToken, content, activeSessionId, personalization);
       responseText = result.responseText;
       returnedSessionId = result.sessionId;
       recommendLegalNotice = result.recommendLegalNotice;
@@ -273,6 +294,9 @@ export const ChatPage: React.FC<ChatPageProps> = ({
         isSessionLoading={isSessionLoading}
         onSendMessage={handleSendMessage}
         onGenerateLegalNotice={onGenerateLegalNotice}
+        keyboardShortcuts={keyboardShortcuts}
+        showSuggestedPrompts={showSuggestedPrompts}
+        enableDictation={enableDictation}
       />
     </>
   );

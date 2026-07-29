@@ -14,12 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parent
 
 BACKEND_PORT = 9001
 FRONTEND_PORT = 3000
+BETA_FRONTEND_PORT = 3001
 HOST = "0.0.0.0"
 
 BACKEND_OUT_LOG = REPO_ROOT / "tllac_backend.out.log"
 BACKEND_ERR_LOG = REPO_ROOT / "tllac_backend.err.log"
 FRONTEND_OUT_LOG = REPO_ROOT / "ui_dev.out.log"
 FRONTEND_ERR_LOG = REPO_ROOT / "ui_dev.err.log"
+BETA_FRONTEND_OUT_LOG = REPO_ROOT / "v1_dev.out.log"
+BETA_FRONTEND_ERR_LOG = REPO_ROOT / "v1_dev.err.log"
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -143,6 +146,11 @@ def _frontend_command() -> list[str]:
     return [str(vite_executable), "--port", str(FRONTEND_PORT), "--host", HOST]
 
 
+def _beta_frontend_command() -> list[str]:
+    vite_executable = Path("node_modules") / ".bin" / "vite"
+    return [str(vite_executable), "--port", str(BETA_FRONTEND_PORT), "--host", HOST, "--strictPort"]
+
+
 def _spawn_service(command: list[str], cwd: Path, stdout_path: Path, stderr_path: Path) -> subprocess.Popen[bytes]:
     stdout_handle = open(stdout_path, "ab")
     stderr_handle = open(stderr_path, "ab")
@@ -162,7 +170,7 @@ def _spawn_service(command: list[str], cwd: Path, stdout_path: Path, stderr_path
 
 def main() -> int:
     print("Checking dev ports...")
-    stop_processes_on_ports([BACKEND_PORT, FRONTEND_PORT])
+    stop_processes_on_ports([BACKEND_PORT, FRONTEND_PORT, BETA_FRONTEND_PORT])
 
     print("Resetting logs...")
     _clear_log_files(
@@ -171,6 +179,8 @@ def main() -> int:
             BACKEND_ERR_LOG,
             FRONTEND_OUT_LOG,
             FRONTEND_ERR_LOG,
+            BETA_FRONTEND_OUT_LOG,
+            BETA_FRONTEND_ERR_LOG,
         ]
     )
 
@@ -190,18 +200,31 @@ def main() -> int:
         FRONTEND_ERR_LOG,
     )
 
+    print("Starting V1 Beta frontend...")
+    _spawn_service(
+        _beta_frontend_command(),
+        REPO_ROOT / "v1",
+        BETA_FRONTEND_OUT_LOG,
+        BETA_FRONTEND_ERR_LOG,
+    )
+
     wait_for_port_to_open(BACKEND_PORT)
     wait_for_port_to_open(FRONTEND_PORT)
+    wait_for_port_to_open(BETA_FRONTEND_PORT)
 
     lan_ip = get_lan_ip()
 
     print(f"Backend is listening on http://{HOST}:{BACKEND_PORT}")
     print(f"Frontend is listening on http://{HOST}:{FRONTEND_PORT}")
+    print(f"V1 Beta frontend is listening on http://{HOST}:{BETA_FRONTEND_PORT}")
     print(f"Local frontend: http://127.0.0.1:{FRONTEND_PORT}")
+    print(f"Local V1 Beta: http://127.0.0.1:{BETA_FRONTEND_PORT}")
     print(f"Team LAN URL: http://{lan_ip}:{FRONTEND_PORT}")
+    print(f"Team V1 Beta URL: http://{lan_ip}:{BETA_FRONTEND_PORT}")
     print(f"LAN backend URL: http://{lan_ip}:{BACKEND_PORT}")
     print(f"Backend logs: {BACKEND_OUT_LOG.name}, {BACKEND_ERR_LOG.name}")
     print(f"Frontend logs: {FRONTEND_OUT_LOG.name}, {FRONTEND_ERR_LOG.name}")
+    print(f"V1 Beta logs: {BETA_FRONTEND_OUT_LOG.name}, {BETA_FRONTEND_ERR_LOG.name}")
     return 0
 
 

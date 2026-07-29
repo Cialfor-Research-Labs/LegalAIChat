@@ -28,13 +28,15 @@ from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import dict_row
 
+from .v1_matter_persistence import V1MatterPersistenceMixin
+
 logger = logging.getLogger("tllac.db")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(_REPO_ROOT / "tllac" / ".env")
 
 
-class DBClient:
+class DBClient(V1MatterPersistenceMixin):
     def __init__(self, db_url: Optional[str] = None):
         self._db_url = db_url or self._resolve_database_url()
 
@@ -216,6 +218,7 @@ class DBClient:
                     ON user_token_usage (user_id, usage_date DESC);
                     """
                 )
+                self._apply_v1_migrations(cur)
             conn.commit()
 
     def _encrypt(self, content: str) -> bytes:
@@ -703,13 +706,17 @@ class DBClient:
         """Return the current UTC date as an ISO date string YYYY-MM-DD."""
         return datetime.now(timezone.utc).date().isoformat()
 
-    def record_token_usage(self, user_id: str, text: str) -> None:
-        """Estimate token count from *text* and upsert today's usage row.
+    def record_token_usage(self, user_id: str, tokens: int) -> None:
+        """Upsert *tokens* (exact Bedrock input + output token count) for today.
 
-        We use a simple 4-chars-per-token heuristic.  No Bedrock SDK changes
-        are required and the estimate is consistent across all call sites.
+        Callers must pass the real token count returned by the Bedrock service
+        layer (``generate_response`` / ``generate_notice_response``).  The old
+        char-based heuristic has been removed; the Bedrock response body
+        contains authoritative ``usage.input_tokens`` and ``usage.output_tokens``
+        values that are used instead.
         """
-        estimated_tokens = max(1, len(text) // _CHARS_PER_TOKEN)
+        if tokens <= 0:
+            return
         today = self._today_utc()
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -720,7 +727,7 @@ class DBClient:
                     ON CONFLICT (user_id, usage_date)
                     DO UPDATE SET tokens_used = user_token_usage.tokens_used + EXCLUDED.tokens_used
                     """,
-                    (user_id, today, estimated_tokens),
+                    (user_id, today, tokens),
                 )
             conn.commit()
 

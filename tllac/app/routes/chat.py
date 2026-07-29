@@ -51,11 +51,6 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional chat session id for remembering previous messages.",
     )
-    matter_id: str | None = Field(
-        default=None,
-        max_length=128,
-        description="Optional matter id for additional matter-document retrieval.",
-    )
 
 
 class ChatResponse(BaseModel):
@@ -670,6 +665,39 @@ async def chat_endpoint(
         matter_context=matter_document_context,
         online_context=online_research_context,
     )
+    preferences = request.personalization or {}
+    if preferences:
+        base_style = str(preferences.get("baseStyle", "Default"))
+        characteristics = ", ".join(
+            f"{label}: {preferences.get(key, 'Default')}"
+            for key, label in (
+                ("warmth", "warmth"),
+                ("enthusiasm", "enthusiasm"),
+                ("headersAndLists", "use of headings and lists"),
+                ("emoji", "emoji use"),
+            )
+        )
+        custom_instructions = str(preferences.get("customInstructions", "")).strip()[:1200]
+        memory_context = ""
+        if preferences.get("memoryEnabled", True):
+            profile = "; ".join(
+                item for item in (
+                    f"name: {str(preferences.get('nickname')).strip()}" if preferences.get("nickname") else "",
+                    f"occupation: {str(preferences.get('occupation')).strip()}" if preferences.get("occupation") else "",
+                    f"additional context: {str(preferences.get('moreAboutYou')).strip()}" if preferences.get("moreAboutYou") else "",
+                ) if item
+            )[:1200]
+            if profile:
+                memory_context = f" User profile context: {profile}."
+        model_query = (
+            "Apply these response presentation preferences when they do not conflict with the user's request, "
+            "legal accuracy, safety requirements, or the instructions above. Do not mention these preferences. "
+            f"Base style: {base_style}. Characteristics: {characteristics}. "
+            f"Fast answers: {'prefer concise direct answers' if preferences.get('fastAnswers', True) else 'prefer complete answers over speed'}."
+            f"{memory_context}"
+            f" Custom instructions: {custom_instructions or '[none]'}.\n\n"
+            f"{model_query}"
+        )
     if retrieval_support_limited:
         model_query = (
             "The retrieved legal authorities are only partially sufficient. "
@@ -696,7 +724,7 @@ async def chat_endpoint(
             f"New follow-up to answer:\n{query}\n\n"
             f"Legal analysis scaffold for this turn:\n{model_query}"
         )
-    response_text = generate_response(
+    response_text, tokens_used = generate_response(
         model_query,
         conversation_history=conversation_history,
     )
@@ -738,8 +766,8 @@ async def chat_endpoint(
     db_client.append_message(user_id, session_id, "assistant", response_text)
     logger.info("Generated chat response (%d chars).", len(response_text))
 
-    # Record token usage (prompt + response contribute to cost)
-    db_client.record_token_usage(user_id, model_query + response_text)
+    # Record exact token usage reported by Bedrock
+    db_client.record_token_usage(user_id, tokens_used)
 
     recommend_legal_notice = _should_recommend_legal_notice(combined_user_context)
     notice_prefill = combined_user_context if recommend_legal_notice else None

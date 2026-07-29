@@ -202,6 +202,39 @@ def _extract_text(response_body: dict) -> str:
     return ""
 
 
+def _extract_token_count(response_body: dict, fallback_text: str = "") -> int:
+    """Return the exact token count from Bedrock's usage field.
+
+    Bedrock (Mistral and most other models) returns a ``usage`` dict in the
+    response body with ``input_tokens`` and ``output_tokens``.  We sum both
+    because we want to track the total tokens billed per call.
+
+    Falls back to the 4-chars-per-token heuristic only when the usage field
+    is absent (e.g. older model versions or unexpected response shapes).
+    """
+    usage = response_body.get("usage") or {}
+    input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens")
+    output_tokens = usage.get("output_tokens") or usage.get("completion_tokens")
+
+    if input_tokens is not None and output_tokens is not None:
+        total = max(1, int(input_tokens) + int(output_tokens))
+        logger.info(
+            "Bedrock token usage — input: %d, output: %d, total: %d",
+            int(input_tokens), int(output_tokens), total,
+        )
+        return total
+
+    # Fallback: char/4 heuristic on the returned text only
+    fallback = max(1, len(fallback_text) // 4)
+    logger.warning(
+        "Bedrock usage field missing from response (keys: %s). "
+        "Falling back to char/4 heuristic → %d tokens.",
+        list(response_body.keys()),
+        fallback,
+    )
+    return fallback
+
+
 def _looks_like_scope_rejection(text: str) -> bool:
     normalized = (text or "").strip().lower()
 
@@ -218,7 +251,12 @@ def _looks_like_scope_rejection(text: str) -> bool:
 def generate_response(
     user_question: str,
     conversation_history: list[dict[str, str]] | None = None,
-) -> str:
+) -> tuple[str, int]:
+    """Call Bedrock and return (response_text, tokens_used).
+
+    *tokens_used* is the sum of input + output tokens as reported by Bedrock.
+    Falls back to a char/4 heuristic if the usage field is absent.
+    """
     try:
         client, _credential_source = _build_bedrock_client()
         model_id = _resolve_model_id()
@@ -238,7 +276,7 @@ def generate_response(
             invoke_kwargs["guardrailIdentifier"] = guardrail_id
             invoke_kwargs["guardrailVersion"] = guardrail_version
 
-        def invoke_once(current_question: str) -> str:
+        def invoke_once(current_question: str) -> tuple[str, int]:
             current_kwargs = dict(invoke_kwargs)
             current_kwargs["body"] = _build_request_body(
                 current_question,
@@ -249,9 +287,11 @@ def generate_response(
             response_body = json.loads(response["body"].read())
             logger.info("Received Bedrock response payload.")
 
-            return _extract_text(response_body) or json.dumps(response_body, indent=2)
+            extracted = _extract_text(response_body) or json.dumps(response_body, indent=2)
+            tokens = _extract_token_count(response_body, fallback_text=extracted)
+            return extracted, tokens
 
-        text = invoke_once(user_question)
+        text, tokens_used = invoke_once(user_question)
 
         if _looks_like_scope_rejection(text):
             logger.info("Retrying Bedrock request with stronger Indian legal framing.")
@@ -263,9 +303,11 @@ def generate_response(
                 f"User query: {user_question}"
             )
 
-            text = invoke_once(retry_question)
+            retry_text, retry_tokens = invoke_once(retry_question)
+            # Accumulate tokens from both the initial and retry call
+            return retry_text, tokens_used + retry_tokens
 
-        return text
+        return text, tokens_used
 
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
@@ -273,20 +315,21 @@ def generate_response(
         if error_code == "UnrecognizedClientException":
             return (
                 "The legal language model could not authenticate with the configured AI provider. "
-                "Check the Bedrock credentials and region in the environment configuration."
+                "Check the Bedrock credentials and region in the environment configuration.",
+                0,
             )
-        return "The legal language model is temporarily unavailable due to an upstream service error."
+        return "The legal language model is temporarily unavailable due to an upstream service error.", 0
 
     except Exception as exc:
         logger.exception("Unexpected error during Bedrock response generation.")
-        return "The legal language model is temporarily unavailable. Please try again."
+        return "The legal language model is temporarily unavailable. Please try again.", 0
 
 
 def generate_notice_response(
     user_question: str,
     system_prompt: str,
     apply_guardrails: bool = False,
-) -> str:
+) -> tuple[str, int]:
     """Generate a response using a custom system prompt (used for notice and document drafting).
 
     Unlike ``generate_response``, this function replaces the default Lawyer AI
@@ -294,6 +337,9 @@ def generate_notice_response(
     clean, uncontradicted instructions for notice and document generation.
     By default, guardrails are disabled (`apply_guardrails=False`) so form inputs
     and legal drafting are not rejected by chat guardrail filters.
+
+    Returns (response_text, tokens_used) where tokens_used is the exact sum of
+    Bedrock input + output tokens (falls back to char/4 heuristic if unavailable).
     """
     try:
         client, _credential_source = _build_bedrock_client()
@@ -312,16 +358,18 @@ def generate_notice_response(
             invoke_kwargs["guardrailIdentifier"] = guardrail_id
             invoke_kwargs["guardrailVersion"] = guardrail_version
 
-        def invoke_once(current_question: str) -> str:
+        def invoke_once(current_question: str) -> tuple[str, int]:
             current_kwargs = dict(invoke_kwargs)
             body = _build_request_body(current_question, None, system_prompt)
             response = client.invoke_model(**current_kwargs, body=body)
             response_body = json.loads(response["body"].read())
             logger.info("Received Bedrock notice/document response payload.")
 
-            return _extract_text(response_body) or json.dumps(response_body, indent=2)
+            extracted = _extract_text(response_body) or json.dumps(response_body, indent=2)
+            tokens = _extract_token_count(response_body, fallback_text=extracted)
+            return extracted, tokens
 
-        text = invoke_once(user_question)
+        text, tokens_used = invoke_once(user_question)
 
         if _looks_like_scope_rejection(text):
             logger.info("Retrying Bedrock notice/document drafting request with explicit Indian legal drafting framing.")
@@ -333,9 +381,10 @@ def generate_notice_response(
             )
             invoke_kwargs.pop("guardrailIdentifier", None)
             invoke_kwargs.pop("guardrailVersion", None)
-            text = invoke_once(retry_question)
+            retry_text, retry_tokens = invoke_once(retry_question)
+            return retry_text, tokens_used + retry_tokens
 
-        return text
+        return text, tokens_used
 
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "")
@@ -343,11 +392,12 @@ def generate_notice_response(
         if error_code == "UnrecognizedClientException":
             return (
                 "The legal language model could not authenticate with the configured AI provider. "
-                "Check the Bedrock credentials and region in the environment configuration."
+                "Check the Bedrock credentials and region in the environment configuration.",
+                0,
             )
-        return "The legal language model is temporarily unavailable due to an upstream service error."
+        return "The legal language model is temporarily unavailable due to an upstream service error.", 0
 
     except Exception as exc:
         logger.exception("Unexpected error during Bedrock notice generation.")
-        return "The legal language model is temporarily unavailable. Please try again."
+        return "The legal language model is temporarily unavailable. Please try again.", 0
 

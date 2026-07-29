@@ -10,12 +10,13 @@ Start with:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .routes.agent import router as agent_router
 from .routes.auth import router as auth_router
 from .routes.chat import router as chat_router
 from .routes.document_generator import router as document_generator_router
 from .routes.legal_notice import router as legal_notice_router
-from .routes.matter_documents import router as matter_documents_router
 from .routes.usage import router as usage_router
+from .routes.v1_auth import router as v1_auth_router
 
 # ──────────────────────────────────────────────
 # Application Instance
@@ -47,8 +48,12 @@ app.include_router(chat_router)
 app.include_router(document_generator_router)
 app.include_router(matter_documents_router)
 app.include_router(legal_notice_router)
+app.include_router(matters_router)
 app.include_router(auth_router)
 app.include_router(usage_router)
+app.include_router(agent_router)
+app.include_router(v1_auth_router)
+
 
 
 # ──────────────────────────────────────────────

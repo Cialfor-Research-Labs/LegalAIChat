@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BookOpen, ChevronDown, Download, FileText, Loader2, LogOut, PanelLeft, Plus, Shield, Wand2, X } from 'lucide-react';
 import { DOCUMENT_SKILLS, getDocumentSkillByType } from './documentSkills';
@@ -151,7 +152,9 @@ function preserveDocumentLineBreaks(document: string) {
         trimmed === '___' ||
         trimmed === '***' ||
         /^#{1,6}\s/.test(trimmed) ||
-        /^(\d+\.|[-*+])\s/.test(trimmed)
+        /^(\d+\.|[-*+])\s/.test(trimmed) ||
+        trimmed.startsWith('|') ||
+        trimmed.startsWith('+')
       ) {
         return line;
       }
@@ -176,13 +179,46 @@ function downloadDocumentTxt(document: string) {
 }
 
 function downloadDocumentDoc(documentText: string) {
-  // Apply the same line-break preservation used in the preview so that
-  // ReactMarkdown generates <br> elements for single-newline breaks inside
-  // paragraphs (markdown requires two trailing spaces for <br>).
-  const processedText = preserveDocumentLineBreaks(documentText);
-  const previewHtml = renderToStaticMarkup(
-    <ReactMarkdown>{processedText}</ReactMarkdown>,
-  );
+  const escapeHtml = (str: string) =>
+    str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const rawLines = documentText
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
+
+  const blocks: string[][] = [];
+  let current: string[] = [];
+
+  for (const raw of rawLines) {
+    if (raw.trim() === '') {
+      if (current.length > 0) {
+        blocks.push(current);
+        current = [];
+      }
+      blocks.push([]);
+    } else {
+      current.push(raw);
+    }
+  }
+  if (current.length > 0) blocks.push(current);
+
+  const paragraphs = blocks
+    .map((block) => {
+      if (block.length === 0) {
+        return '<p>&nbsp;</p>';
+      }
+      const html = block
+        .map((line) => escapeHtml(line).replace(/\*\*(.*?)\*\*/g, '<b>$1</b>'))
+        .join('<br>');
+      return `<p>${html}</p>`;
+    })
+    .join('\n');
+
   const htmlDocument = `<!doctype html>
 <html xmlns:o="urn:schemas-microsoft-com:office:office"
       xmlns:w="urn:schemas-microsoft-com:office:word"
@@ -200,24 +236,16 @@ function downloadDocumentDoc(documentText: string) {
     <style>
       @page { size: A4; margin: 2.54cm 2.54cm 2.54cm 2.54cm; }
       body {
-        font-family: 'Times New Roman', Times, serif;
-        font-size: 12pt;
-        line-height: 1.6;
-        color: #111827;
+        font-family: 'Calibri', 'Arial', 'Helvetica', sans-serif;
+        font-size: 11pt;
+        line-height: 1.5;
+        color: #000000;
       }
-      p { margin: 0 0 8pt 0; text-align: justify; }
-      h1 { font-size: 16pt; font-weight: bold; margin: 14pt 0 6pt 0; }
-      h2 { font-size: 14pt; font-weight: bold; margin: 12pt 0 4pt 0; }
-      h3 { font-size: 12pt; font-weight: bold; margin: 10pt 0 4pt 0; }
-      ul, ol { margin: 0 0 8pt 0; padding-left: 24pt; }
-      li { margin-bottom: 4pt; }
-      strong { font-weight: bold; }
-      em { font-style: italic; }
-      hr { border: none; border-top: 1px solid #999; margin: 12pt 0; }
+      p { margin: 0 0 6pt 0; text-align: justify; }
     </style>
   </head>
   <body>
-    ${previewHtml}
+    ${paragraphs}
   </body>
 </html>`;
   downloadBlob('document-draft.doc', htmlDocument, 'application/msword');
@@ -690,7 +718,7 @@ export const DocumentGenerator: React.FC<DocumentGeneratorProps> = ({
               </div>
             ) : draft?.document ? (
               <div className="prose prose-sm max-w-none whitespace-pre-wrap dark:prose-invert prose-headings:text-on-surface prose-p:my-0 prose-p:leading-relaxed prose-li:my-1">
-                <ReactMarkdown>{previewDocument}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewDocument}</ReactMarkdown>
               </div>
             ) : (
               <div className="flex h-full min-h-[420px] flex-col items-center justify-center text-center text-on-surface-variant">
