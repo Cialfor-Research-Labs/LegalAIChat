@@ -89,3 +89,30 @@ export async function requestWithFallback<T>(
 
   throw lastError instanceof Error ? lastError : new Error('Backend unavailable.');
 }
+
+export async function requestBlobWithFallback(
+  path: string,
+  initFactory: () => RequestInit,
+): Promise<{ blob: Blob; filename: string | null }> {
+  let lastError: unknown = null;
+
+  for (const chatUrl of getApiCandidates()) {
+    const url = `${toApiBase(chatUrl)}${path}`;
+    try {
+      const response = await fetch(url, initFactory());
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      const disposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+      return {
+        blob: await response.blob(),
+        filename: filenameMatch?.[1] ?? null,
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Backend unavailable.');
+}

@@ -6,6 +6,7 @@ boto3
 botocore[crt]
 cryptography
 email-validator
+httpx
 python-multipart
 psycopg[binary]
 ijson

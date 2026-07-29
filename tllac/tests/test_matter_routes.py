@@ -38,34 +38,43 @@ class _FakeHTTPException(Exception):
 
 class _FakeAPIRouter:
     def __init__(self, *args, **kwargs):
+        self.prefix = kwargs.get("prefix", "")
         self.routes = []
 
-    def _decorator(self, *args, **kwargs):
+    def _register(self, path, endpoint, methods):
+        route = types.SimpleNamespace(
+            path=f"{self.prefix}{path}",
+            methods=set(methods),
+            endpoint=endpoint,
+        )
+        self.routes.append(route)
+        return endpoint
+
+    def _decorator(self, method, *args, **kwargs):
+        path = args[0]
+
         def wrapper(func):
-            self.routes.append((args, kwargs, func))
-            return func
+            return self._register(path, func, [method])
 
         return wrapper
 
     def post(self, *args, **kwargs):
-        return self._decorator(*args, **kwargs)
+        return self._decorator("POST", *args, **kwargs)
 
     def get(self, *args, **kwargs):
-        return self._decorator(*args, **kwargs)
+        return self._decorator("GET", *args, **kwargs)
 
     def patch(self, *args, **kwargs):
-        return self._decorator(*args, **kwargs)
+        return self._decorator("PATCH", *args, **kwargs)
 
     def add_api_route(self, *args, **kwargs):
         if len(args) >= 2 and callable(args[1]):
             path = args[0]
             endpoint = args[1]
-            self.routes.append(((path,), kwargs, endpoint))
-            return endpoint
+            return self._register(path, endpoint, kwargs.get("methods", ["GET"]))
 
         def wrapper(func):
-            self.routes.append((args, kwargs, func))
-            return func
+            return self._register(args[0], func, kwargs.get("methods", ["GET"]))
 
         return wrapper
 
@@ -200,6 +209,7 @@ def _run(coro):
 class MatterRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         db_client._init_memory_store()
+        db_client._backend = "memory"
         self.owner = db_client.create_user("owner@example.com", "Matter Owner", "password-123")
         self.other = db_client.create_user("other@example.com", "Other User", "password-456")
 

@@ -3,7 +3,7 @@ import { PanelLeft } from 'lucide-react';
 import { ChatContainer } from './components/ChatContainer';
 import { Message } from './components/ChatMessage';
 import { Sidebar } from './components/Sidebar';
-import { requestWithFallback } from './api';
+import { requestBlobWithFallback, requestWithFallback } from './api';
 
 interface ChatPageProps {
   embedded?: boolean;
@@ -56,6 +56,23 @@ interface ChatResponsePayload {
   session_id: string | null;
   recommend_legal_notice: boolean;
   notice_prefill: string | null;
+}
+
+interface MatterDocument {
+  document_id: string;
+  original_filename: string;
+  status: string;
+  upload_timestamp: string;
+  chunk_count: number;
+}
+
+interface MatterSearchResult {
+  chunk_text: string;
+  document_id: string;
+  document_name: string;
+  page_number: number | null;
+  paragraph_number: number | null;
+  chunk_position: number;
 }
 
 async function requestChatResponse(
@@ -132,6 +149,16 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [chatHistory, setChatHistory] = useState<ChatSessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [matterId, setMatterId] = useState('');
+  const [selectedMatterId, setSelectedMatterId] = useState('');
+  const [selectedMatterFile, setSelectedMatterFile] = useState<File | null>(null);
+  const [matterDocuments, setMatterDocuments] = useState<MatterDocument[]>([]);
+  const [matterSearchQuery, setMatterSearchQuery] = useState('');
+  const [matterSearchResults, setMatterSearchResults] = useState<MatterSearchResult[]>([]);
+  const [matterError, setMatterError] = useState<string | null>(null);
+  const [isMatterLoading, setIsMatterLoading] = useState(false);
+  const [isMatterUploading, setIsMatterUploading] = useState(false);
+  const [isMatterSearching, setIsMatterSearching] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return true;
@@ -270,6 +297,130 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     }
   };
 
+  const loadMatterDocuments = async (targetMatterId: string) => {
+    setIsMatterLoading(true);
+    try {
+      const documents = await requestWithFallback<MatterDocument[]>(
+        `/matter-documents?matter_id=${encodeURIComponent(targetMatterId)}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterDocuments(documents);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to load matter documents.');
+    } finally {
+      setIsMatterLoading(false);
+    }
+  };
+
+  const handleLoadMatter = () => {
+    const normalizedMatterId = matterId.trim();
+    if (!normalizedMatterId) {
+      setMatterError('Enter a matter ID.');
+      return;
+    }
+    setSelectedMatterId(normalizedMatterId);
+    setMatterSearchResults([]);
+    void loadMatterDocuments(normalizedMatterId);
+  };
+
+  const handleUploadMatterDocument = async () => {
+    if (!selectedMatterId || !selectedMatterFile) {
+      setMatterError('Select a matter and a document to upload.');
+      return;
+    }
+    setIsMatterUploading(true);
+    try {
+      const body = new FormData();
+      body.append('matter_id', selectedMatterId);
+      body.append('file', selectedMatterFile);
+      await requestWithFallback<MatterDocument>('/matter-documents/upload', () => ({
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+        body,
+      }));
+      setSelectedMatterFile(null);
+      setMatterError(null);
+      await loadMatterDocuments(selectedMatterId);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to upload the document.');
+    } finally {
+      setIsMatterUploading(false);
+    }
+  };
+
+  const handleSearchMatterDocuments = async () => {
+    const normalizedQuery = matterSearchQuery.trim();
+    if (!selectedMatterId || normalizedQuery.length < 2) {
+      setMatterError('Enter at least two characters to search the selected matter.');
+      return;
+    }
+    setIsMatterSearching(true);
+    try {
+      const result = await requestWithFallback<{ items: MatterSearchResult[] }>(
+        `/matter-documents/search?matter_id=${encodeURIComponent(selectedMatterId)}&query=${encodeURIComponent(normalizedQuery)}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterSearchResults(result.items);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to search matter documents.');
+    } finally {
+      setIsMatterSearching(false);
+    }
+  };
+
+  const handleDocumentStatusChange = async (documentId: string, action: 'archive' | 'delete') => {
+    try {
+      await requestWithFallback<MatterDocument>(
+        action === 'archive'
+          ? `/matter-documents/${documentId}/archive`
+          : `/matter-documents/${documentId}`,
+        () => ({
+          method: action === 'archive' ? 'POST' : 'DELETE',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterSearchResults((current) =>
+        current.filter((result) => result.document_id !== documentId),
+      );
+      await loadMatterDocuments(selectedMatterId);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : `Unable to ${action} the document.`);
+    }
+  };
+
+  const handleDocumentFile = async (documentId: string, disposition: 'view' | 'download') => {
+    try {
+      const result = await requestBlobWithFallback(
+        `/matter-documents/${documentId}/${disposition}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      const objectUrl = URL.createObjectURL(result.blob);
+      if (disposition === 'view') {
+        window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = result.filename || 'matter-document';
+        link.click();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : `Unable to ${disposition} the document.`);
+    }
+  };
+
   const content = (
     <>
       <div className="sticky top-0 z-30 shrink-0 flex items-center justify-between border-b border-outline-variant/20 bg-surface-container p-4">
@@ -313,6 +464,27 @@ export const ChatPage: React.FC<ChatPageProps> = ({
         activeSessionId={activeSessionId}
         error={historyError}
         isOpen={isSidebarOpen}
+        matterId={matterId}
+        selectedMatterId={selectedMatterId}
+        onMatterIdChange={setMatterId}
+        onLoadMatter={handleLoadMatter}
+        onMatterFileChange={setSelectedMatterFile}
+        onUploadMatterDocument={() => void handleUploadMatterDocument()}
+        onMatterSearchChange={setMatterSearchQuery}
+        onSearchMatterDocuments={() => void handleSearchMatterDocuments()}
+        onRefreshMatterDocuments={() => void loadMatterDocuments(selectedMatterId)}
+        onViewDocument={(documentId) => void handleDocumentFile(documentId, 'view')}
+        onDownloadDocument={(documentId) => void handleDocumentFile(documentId, 'download')}
+        onArchiveDocument={(documentId) => void handleDocumentStatusChange(documentId, 'archive')}
+        onDeleteDocument={(documentId) => void handleDocumentStatusChange(documentId, 'delete')}
+        selectedMatterFileName={selectedMatterFile?.name ?? null}
+        isMatterLoading={isMatterLoading}
+        isMatterUploading={isMatterUploading}
+        isMatterSearching={isMatterSearching}
+        matterError={matterError}
+        matterDocuments={matterDocuments}
+        matterSearchResults={matterSearchResults}
+        matterSearchQuery={matterSearchQuery}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
     </div>
