@@ -204,9 +204,10 @@ class MatterRouteTests(unittest.TestCase):
         self.other = db_client.create_user("other@example.com", "Other User", "password-456")
 
     def _route(self, path: str, method: str):
-        for route_args, route_kwargs, func in matters_module.router.routes:
-            if route_args and route_args[0] == path and method in route_kwargs.get("methods", []):
-                return func
+        full_path = f"{matters_module.router.prefix}{path}" if not path.startswith(matters_module.router.prefix) else path
+        for route in matters_module.router.routes:
+            if (getattr(route, "path", None) in (path, full_path)) and method in getattr(route, "methods", []):
+                return route.endpoint
         raise AssertionError(f"Route not found: {method} {path}")
 
     def test_matter_crud_and_overview(self) -> None:
@@ -331,26 +332,32 @@ class MatterRouteTests(unittest.TestCase):
         self.assertEqual(overview["open_tasks"], [])
 
         matters_list = _run(matters_module.list_matters(current_user=owner_user))
-        self.assertEqual(matters_list["matters"][0]["matter_id"], matter_id)
+        matters_dict = matters_list.model_dump() if hasattr(matters_list, "model_dump") else matters_list.dict()
+        self.assertEqual(matters_dict["matters"][0]["matter_id"], matter_id)
         active_list = _run(
             matters_module.list_matters(archive_state="active", current_user=owner_user)
         )
-        self.assertEqual(active_list["matters"][0]["matter_id"], matter_id)
+        active_dict = active_list.model_dump() if hasattr(active_list, "model_dump") else active_list.dict()
+        self.assertEqual(active_dict["matters"][0]["matter_id"], matter_id)
         recent_list = _run(
             matters_module.list_recent_matters(window="30d", current_user=owner_user)
         )
-        self.assertEqual(recent_list["matters"][0]["matter_id"], matter_id)
+        recent_dict = recent_list.model_dump() if hasattr(recent_list, "model_dump") else recent_list.dict()
+        self.assertEqual(recent_dict["matters"][0]["matter_id"], matter_id)
 
         archive_response = _run(matters_module.archive_matter(matter_id, current_user=owner_user))
         self.assertTrue(archive_response["is_archived"])
         with self.assertRaises(Exception) as ctx:
             _run(matters_module.get_matter(matter_id, current_user=owner_user))
         self.assertEqual(getattr(ctx.exception, "status_code", None), 404)
-        self.assertEqual(_run(matters_module.list_matters(current_user=owner_user))["matters"], [])
+        res = _run(matters_module.list_matters(current_user=owner_user))
+        res_dict = res.model_dump() if hasattr(res, "model_dump") else res.dict()
+        self.assertEqual(res_dict["matters"], [])
         archived_list = _run(
             matters_module.list_matters(archive_state="archived", current_user=owner_user)
         )
-        self.assertEqual(archived_list["matters"][0]["matter_id"], matter_id)
+        archived_dict = archived_list.model_dump() if hasattr(archived_list, "model_dump") else archived_list.dict()
+        self.assertEqual(archived_dict["matters"][0]["matter_id"], matter_id)
 
     def test_ownership_and_structured_errors(self) -> None:
         owner_user = {"user_id": self.owner["user_id"]}
