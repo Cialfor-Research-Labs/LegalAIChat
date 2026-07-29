@@ -152,6 +152,105 @@ class V1MatterPersistenceTests(unittest.TestCase):
         self.assertEqual(len(self.client.list_matter_documents(owner_id, matter_id)), 1)
         self.assertEqual(len(self.client.list_matter_research(owner_id, matter_id)), 1)
 
+    def test_overview_and_recent_listing_cover_workspace_data(self) -> None:
+        matter_id = self.matter["matter_id"]
+        owner_id = self.owner["user_id"]
+
+        party = self.client.create_matter_party(
+            user_id=owner_id,
+            matter_id=matter_id,
+            name="Senior Counsel",
+            party_role="counsel",
+        )
+        hearing = self.client.create_matter_hearing(
+            user_id=owner_id,
+            matter_id=matter_id,
+            title="Status hearing",
+        )
+        task = self.client.create_matter_task(
+            user_id=owner_id,
+            matter_id=matter_id,
+            title="Draft affidavit",
+        )
+        self.client.update_matter_related_record(
+            kind="task",
+            user_id=owner_id,
+            matter_id=matter_id,
+            record_id=task["task_id"],
+            status="completed",
+        )
+        note = self.client.create_matter_note(
+            user_id=owner_id,
+            matter_id=matter_id,
+            content="Workspace note",
+        )
+        event = self.client.create_matter_event(
+            user_id=owner_id,
+            matter_id=matter_id,
+            event_type="update",
+            title="Client updated instructions",
+        )
+        document = self.client.create_matter_document(
+            user_id=owner_id,
+            matter_id=matter_id,
+            title="Evidence bundle",
+        )
+        research = self.client.create_matter_research(
+            user_id=owner_id,
+            matter_id=matter_id,
+            title="Research note",
+            query="Recent authority on issue",
+            content="Research content.",
+            verification_status="verified",
+        )
+        draft = self.client.create_matter_draft(
+            user_id=owner_id,
+            matter_id=matter_id,
+            title="Draft one",
+            document_type="brief",
+        )
+
+        overview = self.client.get_matter_overview(owner_id, matter_id)
+        self.assertEqual(overview["matter_details"]["matter_id"], matter_id)
+        self.assertEqual(overview["parties"][0]["party_id"], party["party_id"])
+        self.assertEqual(overview["counsel"][0]["party_id"], party["party_id"])
+        self.assertEqual(overview["hearings"][0]["hearing_id"], hearing["hearing_id"])
+        self.assertEqual(overview["notes"][0]["note_id"], note["note_id"])
+        self.assertEqual(overview["timeline_events"][0]["event_id"], event["event_id"])
+        self.assertEqual(overview["documents"][0]["document_id"], document["document_id"])
+        self.assertEqual(overview["research"][0]["research_id"], research["research_id"])
+        self.assertEqual(overview["drafts"][0]["draft_id"], draft["draft_id"])
+        self.assertEqual([item["task_id"] for item in overview["open_tasks"]], [])
+
+        recent_matters = self.client.list_matters(owner_id, recent_window="30d")
+        self.assertEqual(recent_matters[0]["matter_id"], matter_id)
+
+        archived_task = self.client.archive_matter_related_record(
+            kind="task",
+            user_id=owner_id,
+            matter_id=matter_id,
+            record_id=task["task_id"],
+        )
+        self.assertTrue(archived_task["is_archived"])
+        self.assertEqual(
+            self.client.get_matter_related_record(
+                kind="task",
+                user_id=owner_id,
+                matter_id=matter_id,
+                record_id=task["task_id"],
+                include_archived=True,
+            )["task_id"],
+            task["task_id"],
+        )
+        with self.assertRaisesRegex(ValueError, "Task not found"):
+            self.client.update_matter_related_record(
+                kind="task",
+                user_id=owner_id,
+                matter_id=matter_id,
+                record_id=task["task_id"],
+                status="open",
+            )
+
     def test_draft_versions_are_append_only_and_preserve_history(self) -> None:
         owner_id = self.owner["user_id"]
         other_id = self.other_user["user_id"]
