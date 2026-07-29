@@ -28,6 +28,7 @@ tllac/app/db/chat_memory.json
 *.sqlite
 *.sqlite3
 *.db
+tllac/uploads/
 start_dev_servers.py
 
 # Node / Vite

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, LogOut, MessageSquare, Plus, Shield, X } from 'lucide-react';
+import { Archive, BookOpen, Download, Eye, FileUp, LogOut, MessageSquare, Plus, RefreshCw, Search, Shield, Trash2, X } from 'lucide-react';
 
 interface SidebarProps {
   onNewChat: () => void;
@@ -16,6 +16,40 @@ interface SidebarProps {
     created_at: string;
     updated_at: string;
   }[];
+  matterId: string;
+  selectedMatterId: string;
+  onMatterIdChange: (value: string) => void;
+  onLoadMatter: () => void;
+  onMatterFileChange: (file: File | null) => void;
+  onUploadMatterDocument: () => void;
+  onMatterSearchChange: (value: string) => void;
+  onSearchMatterDocuments: () => void;
+  onRefreshMatterDocuments: () => void;
+  onViewDocument: (documentId: string) => void;
+  onDownloadDocument: (documentId: string) => void;
+  onArchiveDocument: (documentId: string) => void;
+  onDeleteDocument: (documentId: string) => void;
+  selectedMatterFileName: string | null;
+  isMatterLoading: boolean;
+  isMatterUploading: boolean;
+  isMatterSearching: boolean;
+  matterError: string | null;
+  matterDocuments: {
+    document_id: string;
+    original_filename: string;
+    status: string;
+    upload_timestamp: string;
+    chunk_count: number;
+  }[];
+  matterSearchResults: {
+    chunk_text: string;
+    document_id: string;
+    document_name: string;
+    page_number: number | null;
+    paragraph_number: number | null;
+    chunk_position: number;
+  }[];
+  matterSearchQuery: string;
 }
 
 function formatSessionDate(value: string): string {
@@ -38,6 +72,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   error,
   isOpen,
   chatHistory,
+  matterId,
+  selectedMatterId,
+  onMatterIdChange,
+  onLoadMatter,
+  onMatterFileChange,
+  onUploadMatterDocument,
+  onMatterSearchChange,
+  onSearchMatterDocuments,
+  onRefreshMatterDocuments,
+  onViewDocument,
+  onDownloadDocument,
+  onArchiveDocument,
+  onDeleteDocument,
+  selectedMatterFileName,
+  isMatterLoading,
+  isMatterUploading,
+  isMatterSearching,
+  matterError,
+  matterDocuments,
+  matterSearchResults,
+  matterSearchQuery,
 }) => {
   if (!isOpen) {
     return null;
@@ -80,6 +135,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <Plus size={16} />
           New Session
         </button>
+
+        <div className="mt-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-3">
+          <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
+            <FileUp size={13} />
+            Matter Documents
+          </div>
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={matterId}
+              onChange={(event) => onMatterIdChange(event.target.value)}
+              placeholder="Matter ID"
+              className="w-full rounded-xl border border-outline-variant/30 bg-surface-container px-3 py-2 text-sm outline-none transition focus:border-primary/40"
+            />
+            <button type="button" onClick={onLoadMatter} className="neutral-button w-full justify-center text-sm">
+              <RefreshCw size={14} />
+              {selectedMatterId ? 'Switch matter' : 'Load matter'}
+            </button>
+            <div className="rounded-xl border border-dashed border-outline-variant/30 bg-surface-container px-3 py-3">
+              <label className="mb-2 block text-xs font-medium text-on-surface-variant">
+                Upload PDF, DOCX, or TXT
+              </label>
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                onChange={(event) => onMatterFileChange(event.target.files?.[0] ?? null)}
+                className="block w-full text-xs text-on-surface-variant file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-semibold file:text-on-primary"
+              />
+              <div className="mt-2 text-[11px] text-on-surface-variant">
+                {selectedMatterFileName || 'No file selected'}
+              </div>
+              <button
+                type="button"
+                onClick={onUploadMatterDocument}
+                disabled={isMatterUploading || !selectedMatterId}
+                className="primary-button mt-3 w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileUp size={16} />
+                {isMatterUploading ? 'Uploading...' : 'Upload Document'}
+              </button>
+            </div>
+            <div className="rounded-xl border border-outline-variant/20 bg-surface-container px-3 py-3 space-y-2">
+              <label className="block text-xs font-medium text-on-surface-variant">
+                Search matter documents
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={matterSearchQuery}
+                  onChange={(event) => onMatterSearchChange(event.target.value)}
+                  placeholder="Search text"
+                  className="min-w-0 flex-1 rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm outline-none transition focus:border-primary/40"
+                />
+                <button
+                  type="button"
+                  onClick={onSearchMatterDocuments}
+                  disabled={isMatterSearching || !selectedMatterId}
+                  className="neutral-button justify-center px-3 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Search size={16} />
+                </button>
+              </div>
+            </div>
+            {matterError ? (
+              <div className="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
+                {matterError}
+              </div>
+            ) : null}
+            {selectedMatterId ? (
+              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low px-3 py-2 text-xs text-on-surface-variant">
+                Selected matter: <span className="font-mono text-on-surface">{selectedMatterId}</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -128,6 +258,104 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           ) : null}
         </div>
+
+        {selectedMatterId ? (
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
+              <span>Loaded Matter Files</span>
+              <button
+                type="button"
+                onClick={onRefreshMatterDocuments}
+                className="inline-flex items-center gap-1 rounded-full border border-outline-variant/20 px-2 py-1 text-[11px] text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
+              >
+                <RefreshCw size={12} />
+                Refresh
+              </button>
+            </div>
+            {isMatterLoading ? (
+              <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-low px-4 py-4 text-sm text-on-surface-variant">
+                Loading documents...
+              </div>
+            ) : matterDocuments.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-outline-variant/40 bg-surface-container-low px-4 py-4 text-sm text-on-surface-variant">
+                No uploaded documents for this matter yet.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {matterDocuments.map((document) => (
+                  <div
+                    key={document.document_id}
+                    className="rounded-2xl border border-outline-variant/25 bg-surface-container-low px-3 py-3"
+                  >
+                    <div className="mb-2">
+                      <div className="truncate text-sm font-medium text-on-surface">
+                        {document.original_filename}
+                      </div>
+                      <div className="text-[11px] text-on-surface-variant">
+                        {document.status} · {document.chunk_count} chunks
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onViewDocument(document.document_id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-outline-variant/20 px-2 py-1 text-[11px] text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
+                      >
+                        <Eye size={12} />
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDownloadDocument(document.document_id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-outline-variant/20 px-2 py-1 text-[11px] text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
+                      >
+                        <Download size={12} />
+                        Download
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onArchiveDocument(document.document_id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-outline-variant/20 px-2 py-1 text-[11px] text-on-surface-variant transition hover:border-primary/30 hover:text-on-surface"
+                      >
+                        <Archive size={12} />
+                        Archive
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteDocument(document.document_id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-error/20 px-2 py-1 text-[11px] text-error transition hover:bg-error/10"
+                      >
+                        <Trash2 size={12} />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {matterSearchResults.length > 0 ? (
+              <div className="space-y-2">
+                <div className="px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
+                  Search Results
+                </div>
+                {matterSearchResults.map((result, index) => (
+                  <div
+                    key={`${result.document_id}-${result.chunk_position}-${index}`}
+                    className="rounded-2xl border border-outline-variant/25 bg-surface-container-low px-3 py-3 text-xs"
+                  >
+                    <div className="mb-2 flex flex-wrap gap-2 text-[11px] text-on-surface-variant">
+                      <span className="rounded-full bg-surface-container px-2 py-0.5">{result.document_name}</span>
+                      {result.page_number !== null ? <span>Page {result.page_number}</span> : null}
+                      {result.paragraph_number !== null ? <span>Paragraph {result.paragraph_number}</span> : null}
+                      <span>Chunk {result.chunk_position}</span>
+                    </div>
+                    <div className="text-on-surface">{result.chunk_text}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="shrink-0 border-t border-outline-variant/20 bg-surface-container p-3">

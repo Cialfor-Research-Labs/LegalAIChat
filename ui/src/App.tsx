@@ -116,6 +116,17 @@ const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
 const USER_SETTINGS_STORAGE_KEY = 'tllac_user_settings';
 const DOCUMENT_GENERATOR_PATH = '/document-generator/generate';
 
+function getV1BetaUrl(): string {
+  const configuredUrl = import.meta.env.VITE_V1_BETA_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const hostname = window.location.hostname || '127.0.0.1';
+  return `${protocol}//${hostname}:3001`;
+}
+
 const defaultUserSettings: UserSettings = {
   theme: 'dark',
   contrast: 'system',
@@ -432,6 +443,34 @@ export const App: React.FC = () => {
     setActiveTab('chat');
   };
 
+  const openV1Workspace = async () => {
+    const v1Url = import.meta.env.VITE_V1_APP_URL || 'http://localhost:3001';
+    if (!authToken) {
+      return;
+    }
+    const v1Origin = new URL(v1Url).origin;
+    const popup = window.open('', 'legalai-v1');
+    if (!popup) {
+      setAuthError('Your browser blocked the V1 workspace window. Allow pop-ups and try again.');
+      return;
+    }
+    try {
+      const response = await fetch('/tllac-api/v1/launch', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } });
+      if (!response.ok) throw new Error('Unable to launch V1.');
+      const { launch_token } = await response.json();
+      const launchWhenReady = (event: MessageEvent) => {
+        if (event.origin !== v1Origin || event.data?.type !== 'V1_READY') return;
+        window.removeEventListener('message', launchWhenReady);
+        popup.postMessage({ type: 'V1_LAUNCH', token: launch_token }, v1Origin);
+      };
+      window.addEventListener('message', launchWhenReady);
+      popup.location.href = v1Url;
+    } catch (error) {
+      popup.close();
+      setAuthError(error instanceof Error ? error.message : 'Unable to launch V1.');
+    }
+  };
+
   const createNewNotice = () => {
     setActiveTab('legal-notice');
     setNoticeDraft(null);
@@ -653,6 +692,7 @@ export const App: React.FC = () => {
               {currentUser.email}
             </div>
             <TokenUsageBadge authToken={authToken} refreshKey={usageRefreshKey} />
+            <button type="button" onClick={openV1Workspace} className="hidden rounded-xl border border-primary/30 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 md:inline-flex">Open V1</button>
           </div>
 
           {/* Center section: The 3 Navigation Tabs (Text only) */}
@@ -673,6 +713,15 @@ export const App: React.FC = () => {
               className={tabClass('document-generator')}
             >
               Document Generator
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open(getV1BetaUrl(), '_blank', 'noopener,noreferrer')}
+              className="ml-2 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-primary transition hover:border-primary/50 hover:bg-primary/15"
+              aria-label="Open V1 Beta in a new tab"
+              title="Open the isolated V1 Beta workspace"
+            >
+              v1
             </button>
           </div>
 
