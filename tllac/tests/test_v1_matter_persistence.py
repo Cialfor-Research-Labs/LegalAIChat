@@ -368,6 +368,7 @@ class V1PostgresSchemaTests(unittest.TestCase):
             "matter_notes",
             "matter_events",
             "matter_documents",
+            "matter_document_chunks",
             "matter_research",
             "matter_drafts",
             "draft_versions",
@@ -401,10 +402,22 @@ class V1PostgresSchemaTests(unittest.TestCase):
                     """
                     SELECT version
                     FROM v1_schema_migrations
-                    WHERE version = '001_v1_matter_schema'
-                    """
+                    WHERE version = ANY(%s)
+                    """,
+                    (
+                        [
+                            "001_v1_matter_schema",
+                            "002_v1_matter_document_storage",
+                        ],
+                    ),
                 )
-                self.assertIsNotNone(cur.fetchone())
+                self.assertEqual(
+                    {row["version"] for row in cur.fetchall()},
+                    {
+                        "001_v1_matter_schema",
+                        "002_v1_matter_document_storage",
+                    },
+                )
                 cur.execute(
                     """
                     SELECT 1

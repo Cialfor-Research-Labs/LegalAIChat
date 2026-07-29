@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import httpx
@@ -95,7 +96,8 @@ class MatterDocumentApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.upload_root = Path(self.tempdir.name) / "uploads"
-        self.test_db = DBClient()
+        with patch.object(DBClient, "_resolve_database_url", return_value=None):
+            self.test_db = DBClient()
         mds.db_client = self.test_db
         os.environ["MATTER_DOCUMENT_UPLOAD_ROOT"] = str(self.upload_root)
         app.dependency_overrides[get_current_user] = lambda: {
