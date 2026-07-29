@@ -112,7 +112,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
-          fingerprint: ${{ secrets.EC2_FINGERPRINT }}
+          
           port: ${{ secrets.EC2_PORT }}
           source: "legalai-${{ github.sha }}.tar.gz"
           target: "/home/ubuntu/legalai-deploy"
