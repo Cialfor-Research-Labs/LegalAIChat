@@ -16,6 +16,7 @@ from .routes.chat import router as chat_router
 from .routes.document_generator import router as document_generator_router
 from .routes.legal_notice import router as legal_notice_router
 from .routes.usage import router as usage_router
+from .routes.v1_auth import router as v1_auth_router
 
 # ──────────────────────────────────────────────
 # Application Instance
@@ -49,6 +50,7 @@ app.include_router(legal_notice_router)
 app.include_router(auth_router)
 app.include_router(usage_router)
 app.include_router(agent_router)
+app.include_router(v1_auth_router)
 
 
 
