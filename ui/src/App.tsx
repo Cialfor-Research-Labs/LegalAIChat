@@ -432,6 +432,34 @@ export const App: React.FC = () => {
     setActiveTab('chat');
   };
 
+  const openV1Workspace = async () => {
+    const v1Url = import.meta.env.VITE_V1_APP_URL || 'http://localhost:3001';
+    if (!authToken) {
+      return;
+    }
+    const v1Origin = new URL(v1Url).origin;
+    const popup = window.open('', 'legalai-v1');
+    if (!popup) {
+      setAuthError('Your browser blocked the V1 workspace window. Allow pop-ups and try again.');
+      return;
+    }
+    try {
+      const response = await fetch('/tllac-api/v1/launch', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } });
+      if (!response.ok) throw new Error('Unable to launch V1.');
+      const { launch_token } = await response.json();
+      const launchWhenReady = (event: MessageEvent) => {
+        if (event.origin !== v1Origin || event.data?.type !== 'V1_READY') return;
+        window.removeEventListener('message', launchWhenReady);
+        popup.postMessage({ type: 'V1_LAUNCH', token: launch_token }, v1Origin);
+      };
+      window.addEventListener('message', launchWhenReady);
+      popup.location.href = v1Url;
+    } catch (error) {
+      popup.close();
+      setAuthError(error instanceof Error ? error.message : 'Unable to launch V1.');
+    }
+  };
+
   const createNewNotice = () => {
     setActiveTab('legal-notice');
     setNoticeDraft(null);
@@ -653,6 +681,7 @@ export const App: React.FC = () => {
               {currentUser.email}
             </div>
             <TokenUsageBadge authToken={authToken} refreshKey={usageRefreshKey} />
+            <button type="button" onClick={openV1Workspace} className="hidden rounded-xl border border-primary/30 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/10 md:inline-flex">Open V1</button>
           </div>
 
           {/* Center section: The 3 Navigation Tabs (Text only) */}
