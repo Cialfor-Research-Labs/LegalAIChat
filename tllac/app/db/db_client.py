@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
@@ -116,7 +117,8 @@ class DBClient(V1MatterPersistenceMixin):
         self._memory_users: dict[str, dict[str, Any]] = {}
         self._memory_sessions: dict[str, dict[str, Any]] = {}
         self._memory_artifacts: dict[str, dict[str, Any]] = {}
-        self._init_v1_memory_store()
+        self._memory_documents: dict[str, dict[str, Any]] = {}
+        self._memory_document_chunks: dict[str, list[dict[str, Any]]] = {}
 
     def _connect(self):
         return psycopg.connect(self._db_url, row_factory=dict_row)
@@ -170,6 +172,39 @@ class DBClient(V1MatterPersistenceMixin):
 
                     CREATE INDEX IF NOT EXISTS idx_generated_artifacts_user_type_updated
                     ON generated_artifacts (user_id, artifact_type, updated_at DESC);
+
+                    CREATE TABLE IF NOT EXISTS matter_documents (
+                        document_id UUID PRIMARY KEY,
+                        user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+                        matter_id TEXT NOT NULL,
+                        original_filename TEXT NOT NULL,
+                        storage_path TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
+                        file_extension TEXT NOT NULL,
+                        upload_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        status TEXT NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('active', 'deleted', 'archived'))
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_matter_documents_user_matter_status
+                    ON matter_documents (user_id, matter_id, status, upload_timestamp DESC);
+
+                    CREATE TABLE IF NOT EXISTS matter_document_chunks (
+                        chunk_id UUID PRIMARY KEY,
+                        document_id UUID NOT NULL REFERENCES matter_documents(document_id) ON DELETE CASCADE,
+                        user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+                        matter_id TEXT NOT NULL,
+                        page_number INTEGER,
+                        paragraph_number INTEGER,
+                        chunk_position INTEGER NOT NULL,
+                        chunk_text TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_matter_document_chunks_document_position
+                    ON matter_document_chunks (document_id, chunk_position ASC);
+
+                    CREATE INDEX IF NOT EXISTS idx_matter_document_chunks_search
+                    ON matter_document_chunks USING GIN (to_tsvector('simple', chunk_text));
 
                     CREATE TABLE IF NOT EXISTS user_token_usage (
                         user_id UUID NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
