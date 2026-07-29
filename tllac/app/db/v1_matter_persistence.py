@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,29 @@ _RELATED_TABLES: dict[str, tuple[str, str, str]] = {
     "research": ("matter_research", "research_id", "updated_at"),
 }
 
+_RECENT_WINDOW_MAP = {
+    "30d": timedelta(days=30),
+    "6m": timedelta(days=182),
+    "1y": timedelta(days=365),
+}
+
+_COUNSEL_ROLE_HINTS = (
+    "counsel",
+    "advocate",
+    "lawyer",
+    "attorney",
+    "solicitor",
+    "legal representative",
+)
+
+_RELATED_UPDATE_FIELDS: dict[str, tuple[str, ...]] = {
+    "party": ("name", "party_role", "details"),
+    "hearing": ("title", "hearing_at", "court", "status", "notes", "details"),
+    "task": ("title", "description", "due_at", "status", "priority", "details"),
+    "note": ("title", "content", "is_private"),
+    "event": ("event_type", "title", "description", "event_at", "source_type", "source_id", "details"),
+}
+
 
 def _json_value(value: Any) -> Any:
     return Jsonb(value) if isinstance(value, (dict, list)) else value
@@ -48,6 +71,10 @@ def _serialize_value(value: Any) -> Any:
 
 def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
     return {key: _serialize_value(value) for key, value in row.items()}
+
+
+def _normalize_optional_text(value: Any) -> str:
+    return str(value).strip().lower()
 
 
 class V1MatterPersistenceMixin:
@@ -227,7 +254,9 @@ class V1MatterPersistenceMixin:
         user_id: str,
         *,
         include_archived: bool = False,
+        recent_window: str | None = None,
     ) -> list[dict[str, Any]]:
+        cutoff_delta = self._v1_parse_recent_window(recent_window)
         if self._backend != "postgres":
             rows = [
                 row
@@ -235,7 +264,23 @@ class V1MatterPersistenceMixin:
                 if row["user_id"] == user_id
                 and (include_archived or not row["is_archived"])
             ]
-            rows.sort(key=lambda item: item["updated_at"], reverse=True)
+            if cutoff_delta is not None:
+                cutoff = self._now() - cutoff_delta
+                rows = [
+                    row
+                    for row in rows
+                    if (self._v1_matter_last_activity(user_id=user_id, matter_id=row["matter_id"]) or self._now()) >= cutoff
+                ]
+            if cutoff_delta is not None:
+                rows.sort(
+                    key=lambda item: self._v1_matter_last_activity(
+                        user_id=user_id,
+                        matter_id=item["matter_id"],
+                    ) or item["updated_at"],
+                    reverse=True,
+                )
+            else:
+                rows.sort(key=lambda item: item["updated_at"], reverse=True)
             return [_serialize_row(row) for row in rows]
 
         archived_clause = "" if include_archived else "AND is_archived = FALSE"
@@ -252,6 +297,22 @@ class V1MatterPersistenceMixin:
                     (user_id,),
                 )
                 rows = cur.fetchall()
+        if cutoff_delta is not None:
+            cutoff = self._now() - cutoff_delta
+            rows = [
+                row
+                for row in rows
+                if (self._v1_matter_last_activity(user_id=user_id, matter_id=str(row["matter_id"])) or self._now()) >= cutoff
+            ]
+            rows.sort(
+                key=lambda item: self._v1_matter_last_activity(
+                    user_id=user_id,
+                    matter_id=str(item["matter_id"]),
+                ) or item["updated_at"],
+                reverse=True,
+            )
+        else:
+            rows.sort(key=lambda item: item["updated_at"], reverse=True)
         return [_serialize_row(row) for row in rows]
 
     def update_matter(
@@ -332,6 +393,348 @@ class V1MatterPersistenceMixin:
         if not row:
             raise ValueError("Matter not found.")
         return _serialize_row(row)
+
+    def _v1_parse_recent_window(self, recent_window: str | None) -> timedelta | None:
+        if recent_window is None or not str(recent_window).strip():
+            return None
+        window_key = str(recent_window).strip().lower()
+        if window_key not in _RECENT_WINDOW_MAP:
+            raise ValueError("Unsupported recent window. Use 30d, 6m, or 1y.")
+        return _RECENT_WINDOW_MAP[window_key]
+
+    def _v1_related_table_row(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+        include_archived: bool = False,
+    ) -> dict[str, Any]:
+        table, id_field, _ = _RELATED_TABLES[kind]
+        self._v1_assert_matter_owned(
+            user_id,
+            matter_id,
+            include_archived=include_archived,
+        )
+        if self._backend != "postgres":
+            row = self._memory_v1_tables[table].get(record_id)
+            if (
+                not row
+                or row["user_id"] != user_id
+                or row["matter_id"] != matter_id
+                or (row["is_archived"] and not include_archived)
+            ):
+                raise ValueError(f"{kind.title()} not found.")
+            return row
+
+        archived_clause = "" if include_archived else "AND is_archived = FALSE"
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT *
+                    FROM {table}
+                    WHERE {id_field} = %s
+                      AND user_id = %s
+                      AND matter_id = %s
+                    {archived_clause}
+                    """,
+                    (record_id, user_id, matter_id),
+                )
+                row = cur.fetchone()
+        if not row:
+            raise ValueError(f"{kind.title()} not found.")
+        return row
+
+    def _v1_related_update(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+        **changes: Any,
+    ) -> dict[str, Any]:
+        allowed = _RELATED_UPDATE_FIELDS.get(kind, ())
+        values = {key: value for key, value in changes.items() if key in allowed}
+        if not values:
+            return _serialize_row(
+                self._v1_related_table_row(
+                    kind=kind,
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    record_id=record_id,
+                )
+            )
+        self._v1_related_table_row(
+            kind=kind,
+            user_id=user_id,
+            matter_id=matter_id,
+            record_id=record_id,
+        )
+        table, id_field, _ = _RELATED_TABLES[kind]
+        if self._backend != "postgres":
+            row = self._memory_v1_tables[table][record_id]
+            row.update(values)
+            row["updated_at"] = self._now()
+            return _serialize_row(row)
+
+        assignments = ", ".join(f"{column} = %s" for column in values)
+        params = [
+            Jsonb(value) if key in _JSON_FIELDS else value
+            for key, value in values.items()
+        ]
+        params.extend([user_id, matter_id, record_id])
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {table}
+                    SET {assignments}
+                    WHERE user_id = %s
+                      AND matter_id = %s
+                      AND {id_field} = %s
+                      AND is_archived = FALSE
+                    RETURNING *
+                    """,
+                    params,
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if not row:
+            raise ValueError(f"{kind.title()} not found.")
+        return _serialize_row(row)
+
+    def _v1_archive_related(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+    ) -> dict[str, Any]:
+        table, id_field, _ = _RELATED_TABLES[kind]
+        self._v1_related_table_row(
+            kind=kind,
+            user_id=user_id,
+            matter_id=matter_id,
+            record_id=record_id,
+        )
+        if self._backend != "postgres":
+            row = self._memory_v1_tables[table][record_id]
+            row["is_archived"] = True
+            row["archived_at"] = self._now()
+            row["updated_at"] = self._now()
+            return _serialize_row(row)
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {table}
+                    SET is_archived = TRUE, archived_at = NOW()
+                    WHERE user_id = %s
+                      AND matter_id = %s
+                      AND {id_field} = %s
+                      AND is_archived = FALSE
+                    RETURNING *
+                    """,
+                    (user_id, matter_id, record_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if not row:
+            raise ValueError(f"{kind.title()} not found.")
+        return _serialize_row(row)
+
+    def _v1_related_latest_timestamp(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+    ) -> datetime | None:
+        table, _, _ = _RELATED_TABLES[kind]
+        if self._backend != "postgres":
+            timestamps = []
+            for row in self._memory_v1_tables[table].values():
+                if row["user_id"] != user_id or row["matter_id"] != matter_id:
+                    continue
+                timestamps.append(row.get("updated_at") or row.get("created_at"))
+                archived_at = row.get("archived_at")
+                if archived_at:
+                    timestamps.append(archived_at)
+            return max(timestamps) if timestamps else None
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT MAX(latest_ts) AS latest_ts
+                    FROM (
+                        SELECT COALESCE(updated_at, created_at) AS latest_ts
+                        FROM {table}
+                        WHERE user_id = %s AND matter_id = %s
+                        UNION ALL
+                        SELECT archived_at AS latest_ts
+                        FROM {table}
+                        WHERE user_id = %s AND matter_id = %s AND archived_at IS NOT NULL
+                    ) AS timestamps
+                    """,
+                    (user_id, matter_id, user_id, matter_id),
+                )
+                row = cur.fetchone()
+        latest_ts = row["latest_ts"] if row else None
+        return latest_ts
+
+    def _v1_matter_last_activity(
+        self,
+        *,
+        user_id: str,
+        matter_id: str,
+    ) -> datetime | None:
+        matter = self._v1_assert_matter_owned(user_id, matter_id, include_archived=True)
+        timestamps: list[datetime] = [
+            matter.get("updated_at") or matter.get("created_at"),
+        ]
+        archived_at = matter.get("archived_at")
+        if archived_at:
+            timestamps.append(archived_at)
+        for kind in ("party", "hearing", "task", "note", "event", "document", "research"):
+            latest = self._v1_related_latest_timestamp(
+                kind=kind,
+                user_id=user_id,
+                matter_id=matter_id,
+            )
+            if latest:
+                timestamps.append(latest)
+        if self._backend != "postgres":
+            draft_rows = [
+                row
+                for row in self._memory_v1_tables["matter_drafts"].values()
+                if row["user_id"] == user_id and row["matter_id"] == matter_id
+            ]
+            if draft_rows:
+                timestamps.append(
+                    max(row.get("updated_at") or row.get("created_at") for row in draft_rows)
+                )
+        else:
+            with self._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT MAX(COALESCE(updated_at, created_at)) AS latest_ts
+                        FROM matter_drafts
+                        WHERE user_id = %s AND matter_id = %s
+                        """,
+                        (user_id, matter_id),
+                    )
+                    row = cur.fetchone()
+            if row and row["latest_ts"]:
+                timestamps.append(row["latest_ts"])
+        return max(timestamps) if timestamps else None
+
+    def _v1_counsel_from_parties(self, parties: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        counsel: list[dict[str, Any]] = []
+        for party in parties:
+            haystack = " ".join(
+                str(part) for part in (
+                    party.get("name", ""),
+                    party.get("party_role", ""),
+                    party.get("details", ""),
+                )
+            ).lower()
+            if any(hint in haystack for hint in _COUNSEL_ROLE_HINTS):
+                counsel.append(party)
+        return counsel
+
+    def get_matter_overview(
+        self,
+        user_id: str,
+        matter_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> dict[str, Any]:
+        matter = self.get_matter(user_id, matter_id, include_archived=include_archived)
+        parties = self.list_matter_parties(user_id, matter_id)
+        hearings = self.list_matter_hearings(user_id, matter_id)
+        tasks = self.list_matter_tasks(user_id, matter_id)
+        notes = self.list_matter_notes(user_id, matter_id)
+        events = self.list_matter_events(user_id, matter_id)
+        documents = self.list_matter_documents(user_id, matter_id)
+        research = self.list_matter_research(user_id, matter_id)
+        drafts = self.list_matter_drafts(user_id, matter_id)
+
+        open_tasks = [
+            task
+            for task in tasks
+            if _normalize_optional_text(task.get("status")) not in {"completed", "done", "cancelled", "canceled"}
+        ]
+
+        return {
+            "matter_details": matter,
+            "parties": parties,
+            "counsel": self._v1_counsel_from_parties(parties),
+            "hearings": hearings,
+            "open_tasks": open_tasks,
+            "notes": notes,
+            "timeline_events": events,
+            "documents": documents,
+            "research": research,
+            "drafts": drafts,
+        }
+
+    def get_matter_related_record(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+        include_archived: bool = False,
+    ) -> dict[str, Any]:
+        return _serialize_row(
+            self._v1_related_table_row(
+                kind=kind,
+                user_id=user_id,
+                matter_id=matter_id,
+                record_id=record_id,
+                include_archived=include_archived,
+            )
+        )
+
+    def update_matter_related_record(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+        **changes: Any,
+    ) -> dict[str, Any]:
+        return self._v1_related_update(
+            kind=kind,
+            user_id=user_id,
+            matter_id=matter_id,
+            record_id=record_id,
+            **changes,
+        )
+
+    def archive_matter_related_record(
+        self,
+        *,
+        kind: str,
+        user_id: str,
+        matter_id: str,
+        record_id: str,
+    ) -> dict[str, Any]:
+        return self._v1_archive_related(
+            kind=kind,
+            user_id=user_id,
+            matter_id=matter_id,
+            record_id=record_id,
+        )
 
     def _v1_create_related(
         self,
