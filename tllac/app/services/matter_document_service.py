@@ -294,6 +294,8 @@ def _store_document_record(
                     document_id,
                     user_id,
                     matter_id,
+                    title,
+                    file_name,
                     original_filename,
                     storage_path,
                     mime_type,
@@ -301,12 +303,14 @@ def _store_document_record(
                     upload_timestamp,
                     status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), 'active')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'active')
                 """,
                 (
                     document_id,
                     user_id,
                     matter_id,
+                    original_filename,
+                    original_filename,
                     original_filename,
                     storage_path,
                     mime_type,
@@ -492,12 +496,23 @@ def update_document_status(user_id: str, document_id: str, status: str) -> dict[
             cur.execute(
                 """
                 UPDATE matter_documents
-                SET status = %s
+                SET status = %s,
+                    is_archived = (%s <> 'active'),
+                    archived_at = CASE
+                        WHEN %s <> 'active' THEN NOW()
+                        ELSE NULL
+                    END
                 WHERE document_id = %s AND user_id = %s
                 RETURNING document_id, user_id, matter_id, original_filename, storage_path,
                           mime_type, file_extension, upload_timestamp, status
                 """,
-                (normalized_status, document_id, user_id),
+                (
+                    normalized_status,
+                    normalized_status,
+                    normalized_status,
+                    document_id,
+                    user_id,
+                ),
             )
             row = cur.fetchone()
             if not row:

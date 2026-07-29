@@ -435,6 +435,8 @@ def _register_related_routes(segment: str, spec: dict[str, Any]) -> None:
             raise ValueError(f"Unsupported resource kind: {kind}.")
         except ValueError as exc:
             _raise_value_error(exc, resource=label)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{label.replace(' ', '_')}_validation_error", str(exc)) from exc
 
@@ -568,6 +570,8 @@ def _register_related_routes(segment: str, spec: dict[str, Any]) -> None:
             )
         except ValueError as exc:
             _raise_value_error(exc, resource=label)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{label.replace(' ', '_')}_validation_error", str(exc)) from exc
 
