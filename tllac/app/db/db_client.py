@@ -27,13 +27,15 @@ from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import dict_row
 
+from .v1_matter_persistence import V1MatterPersistenceMixin
+
 logger = logging.getLogger("tllac.db")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(_REPO_ROOT / "tllac" / ".env")
 
 
-class DBClient:
+class DBClient(V1MatterPersistenceMixin):
     def __init__(self, db_url: Optional[str] = None):
         self._db_url = db_url or self._resolve_database_url()
 
@@ -114,6 +116,7 @@ class DBClient:
         self._memory_users: dict[str, dict[str, Any]] = {}
         self._memory_sessions: dict[str, dict[str, Any]] = {}
         self._memory_artifacts: dict[str, dict[str, Any]] = {}
+        self._init_v1_memory_store()
 
     def _connect(self):
         return psycopg.connect(self._db_url, row_factory=dict_row)
@@ -180,6 +183,7 @@ class DBClient:
                     ON user_token_usage (user_id, usage_date DESC);
                     """
                 )
+                self._apply_v1_migrations(cur)
             conn.commit()
 
     def _encrypt(self, content: str) -> bytes:
