@@ -9,3 +9,5 @@ email-validator
 python-multipart
 psycopg[binary]
 ijson
+pypdf
+pytest
