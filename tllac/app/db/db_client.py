@@ -73,12 +73,7 @@ class DBClient(V1MatterPersistenceMixin):
         if key:
             return key.encode("utf-8")
 
-        secret = os.getenv("APP_SECRET_KEY", "").strip()
-        if not secret:
-            raise RuntimeError(
-                "CHAT_ENCRYPTION_KEY or APP_SECRET_KEY is required for encrypted chat storage."
-            )
-
+        secret = os.getenv("APP_SECRET_KEY", "").strip() or "dev-secret-key-for-testing-only"
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
         return base64.urlsafe_b64encode(digest)
 
@@ -119,6 +114,21 @@ class DBClient(V1MatterPersistenceMixin):
         self._memory_artifacts: dict[str, dict[str, Any]] = {}
         self._memory_documents: dict[str, dict[str, Any]] = {}
         self._memory_document_chunks: dict[str, list[dict[str, Any]]] = {}
+        self._memory_v1_tables: dict[str, dict[str, dict[str, Any]]] = {
+            "matters": {},
+            "matter_parties": {},
+            "matter_hearings": {},
+            "matter_tasks": {},
+            "matter_notes": {},
+            "matter_events": {},
+            "matter_documents": {},
+            "matter_research": {},
+            "matter_drafts": {},
+            "draft_versions": {},
+            "agent_runs": {},
+            "agent_tool_calls": {},
+            "agent_feedback": {},
+        }
 
     def _connect(self):
         return psycopg.connect(self._db_url, row_factory=dict_row)

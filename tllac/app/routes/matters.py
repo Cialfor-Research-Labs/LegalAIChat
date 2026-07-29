@@ -234,6 +234,10 @@ def _matter_list(
     archive_state: str = "active",
     recent_window: str | None = None,
 ) -> list[dict[str, Any]]:
+    if not isinstance(archive_state, str):
+        archive_state = getattr(archive_state, "default", "active") or "active"
+    if recent_window is not None and not isinstance(recent_window, str):
+        recent_window = getattr(recent_window, "default", None)
     state = archive_state.strip().lower()
     include_archived = state in {"archived", "all"}
     rows = db_client.list_matters(
@@ -300,8 +304,9 @@ async def get_matter(
     current_user: dict[str, str] = Depends(get_current_user),
 ):
     user_id = current_user["user_id"]
+    is_inc_arch = include_archived if isinstance(include_archived, bool) else bool(getattr(include_archived, "default", False))
     try:
-        return db_client.get_matter(user_id, matter_id, include_archived=include_archived)
+        return db_client.get_matter(user_id, matter_id, include_archived=is_inc_arch)
     except ValueError as exc:
         _raise_value_error(exc)
 
