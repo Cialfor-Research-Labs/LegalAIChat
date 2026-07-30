@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import sqlite3
 from threading import Lock
+from functools import lru_cache
 
 from dotenv import load_dotenv
 
@@ -869,6 +870,11 @@ def retrieve_legal_rag_result(query: str) -> LegalRagResult:
     if not legal_rag_enabled() or not normalized_query:
         return LegalRagResult(query=normalized_query, statute_matches=(), case_matches=(), confidence=0.0, grounded=False)
 
+    return _retrieve_legal_rag_result_cached(normalized_query)
+
+
+@lru_cache(maxsize=256)
+def _retrieve_legal_rag_result_cached(normalized_query: str) -> LegalRagResult:
     analysis = analyze_legal_query(normalized_query)
     curated_statutes, curated_cases = _INDEX.retrieve(normalized_query)
     corpus_statutes, corpus_cases = _retrieve_corpus_matches(normalized_query, analysis)

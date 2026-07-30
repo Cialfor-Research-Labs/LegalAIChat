@@ -14,6 +14,7 @@ from ..db.db_client import db_client
 from .agent_models import AgentCommand, AgentRunResponse, AgentRunState, ToolCallRecord
 from .agent_tools import execute_approved_tool
 from .bedrock_llm_service import generate_response
+from .research_service import run_research
 from .matter_context_service import matter_context_service
 
 logger = logging.getLogger("tllac.services.agent_orchestrator")
@@ -223,31 +224,28 @@ class AgentOrchestrator:
                 output_text = f"Successfully recorded diary entry:\n- **Title**: {entry_title}\n- **ID**: {res.get('task_id') or res.get('hearing_id')}"
 
             elif command == AgentCommand.RESEARCH:
-                # Retrieving -> Analyzing -> Verifying -> Committing -> Completed
+                # Retrieving -> Analyzing -> Verifying -> Committing -> Completed/Review Required
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.RETRIEVING.value,
                 )
-                corpus_res = log_and_exec_tool("search_legal_corpus", {"query": query or context.title})
-                doc_res = log_and_exec_tool("search_matter_documents", {"query": query or context.title})
-
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.ANALYZING.value,
                 )
-                prompt = (
-                    f"Perform legal research for matter '{context.title}'.\n"
-                    f"Query: {query or 'General research'}\n"
-                    f"Statutes & Authorities: {corpus_res.get('context_block', '')}\n"
-                    f"Matter Documents Match Count: {len(doc_res)}\n"
-                    "Provide a clear, structured research memorandum."
+                research_query = query or context.title
+                research_result = run_research(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    query=research_query,
+                    conversation_history=conversation_history,
                 )
-                output_text, tokens_used = generate_response(prompt)
-                total_tokens += tokens_used
+                output_text = research_result.output_text
+                total_tokens += research_result.tokens_used
 
                 # Verifying
                 db_client.update_agent_run(
@@ -258,20 +256,16 @@ class AgentOrchestrator:
                 )
 
                 # Committing
+                if research_result.verification.verified and research_result.saved_research:
+                    final_state = AgentRunState.COMPLETED
+                else:
+                    final_state = AgentRunState.REVIEW_REQUIRED
+
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.COMMITTING.value,
-                )
-                log_and_exec_tool(
-                    "save_research",
-                    {
-                        "title": f"Research: {query[:50] if query else context.title}",
-                        "query": query or context.title,
-                        "content": output_text,
-                        "evidence": corpus_res.get("authorities", []),
-                    },
                 )
 
             elif command == AgentCommand.DRAFT:
