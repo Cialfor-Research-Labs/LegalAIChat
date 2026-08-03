@@ -13,6 +13,7 @@ import {
   MatterCreateInput,
   MatterOverview,
   runMatterAgent,
+  uploadMatterDocument,
   V1AuthResult,
   V1User,
 } from './core/api';
@@ -109,11 +110,18 @@ export function App() {
     return () => { cancelled = true; };
   }, [appState, openMatter]);
 
-  const handleCreateMatter = async (input: MatterCreateInput) => {
+  const handleCreateMatter = async (input: MatterCreateInput, file?: File | null) => {
     setIsCreating(true);
     setWorkspaceError(null);
     try {
       const matter = await createMatter(input);
+      if (file) {
+        try {
+          await uploadMatterDocument(matter.matter_id, file);
+        } catch (uploadErr) {
+          console.warn('Could not auto-attach uploaded document to matter workspace:', uploadErr);
+        }
+      }
       setMatters((current) => [matter, ...current]);
       setIsCreateOpen(false);
       await openMatter(matter.matter_id);
@@ -123,6 +131,7 @@ export function App() {
       setIsCreating(false);
     }
   };
+
 
   // ── Render states ─────────────────────────────────────────────────────────
   if (appState === 'checking') {
@@ -226,9 +235,11 @@ export function App() {
               if (result.status === 'failed') throw new Error(result.error_text || 'The Case Agent failed.');
               return result.output_text || 'The command completed without output.';
             }}
+            onRefreshOverview={() => selectedMatterId && openMatter(selectedMatterId)}
           />
           <SourcePanel />
         </div>
+
       </div>
       {isCreateOpen && (
         <CreateMatterDialog

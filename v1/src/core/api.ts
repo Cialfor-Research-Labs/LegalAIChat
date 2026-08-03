@@ -145,6 +145,89 @@ export function runMatterAgent(matterId: string, commandText: string): Promise<A
   });
 }
 
+export interface MatterParsedFields {
+  title: string;
+  description: string;
+  case_number?: string | null;
+  court?: string | null;
+  jurisdiction?: string | null;
+  stage?: string | null;
+}
+
+export async function parseMatterDocument(file: File): Promise<MatterParsedFields> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const token = getStoredToken();
+  const res = await fetch(`${BASE}/v1/matters/parse-document`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let detail = `Failed to parse document (${res.status})`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === 'string') detail = body.detail;
+      else if (typeof body?.detail?.error?.message === 'string') detail = body.detail.error.message;
+    } catch { /* ignore parse errors */ }
+    throw new Error(detail);
+  }
+
+  return res.json() as Promise<MatterParsedFields>;
+}
+
+export interface UploadedDocumentResult {
+  document_id?: string;
+  id?: string;
+  original_filename?: string;
+  name?: string;
+}
+
+export async function uploadMatterDocument(matterId: string, file: File): Promise<UploadedDocumentResult> {
+  const formData = new FormData();
+  formData.append('matter_id', matterId);
+  formData.append('file', file);
+
+  const token = getStoredToken();
+  let res = await fetch(`${BASE}/matter-documents/upload`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const v1FormData = new FormData();
+    v1FormData.append('file', file);
+    res = await fetch(`${BASE}/v1/matters/${matterId}/documents`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: v1FormData,
+    });
+  }
+
+  if (!res.ok) {
+    let detail = `Failed to upload document (${res.status})`;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === 'string') detail = body.detail;
+      else if (typeof body?.detail?.error?.message === 'string') detail = body.detail.error.message;
+    } catch { /* ignore parse errors */ }
+    throw new Error(detail);
+  }
+
+  return res.json() as Promise<UploadedDocumentResult>;
+}
+
+
+
 function authHeaders(): Record<string, string> {
   const token = getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
