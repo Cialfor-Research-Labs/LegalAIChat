@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Bell, BriefcaseBusiness, ChevronDown, Command, FileStack, LayoutDashboard, LogOut, Search, Settings, Users } from 'lucide-react';
+import { Bell, BriefcaseBusiness, ChevronDown, Command, FileStack, LayoutDashboard, LogOut, Search, Settings, Users, X } from 'lucide-react';
 import { betaConfig } from './core/betaConfig';
 import {
   clearSession,
@@ -382,6 +382,13 @@ export function App() {
     const matter = selectedMatter ?? null;
     const documentCount = overview?.documents.length ?? 0;
     const taskCount = overview?.open_tasks.length ?? 0;
+    const evidenceCount = documentCount + (overview?.research.length ?? 0);
+    const openCurrentMatter = () => {
+      if (selectedMatterId) {
+        void openMatter(selectedMatterId);
+      }
+      closeUtilityPanel();
+    };
     const filteredMatters = utilityQuery.trim()
       ? matters.filter((item) =>
           [item.title, item.case_number || '', item.court || '', item.jurisdiction || '']
@@ -393,47 +400,75 @@ export function App() {
 
     let title = 'Workspace panel';
     let body = (
-      <p style={{ color: 'var(--muted)', fontSize: 12 }}>
-        This panel is available from the top bar and sidebar controls.
-      </p>
+      <div className="utility-panel-body">
+        <p className="utility-panel-intro">
+          This panel is available from the top bar and sidebar controls.
+        </p>
+      </div>
     );
 
     if (utilityPanel === 'settings') {
       title = 'Settings';
       body = (
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        <div className="utility-panel-body">
+          <p className="utility-panel-intro">
             Current workspace preferences and quick actions for this V1 session.
           </p>
-          <div className="matter-list">
-            <article>
-              <div>
-                <strong>Active section</strong>
-                <span>{activeSection}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Selected matter</strong>
-                <span>{matter?.title || 'None'}</span>
-              </div>
-            </article>
+          <div className="utility-summary-grid">
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Active section</span>
+              <strong>{activeSection}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Selected matter</span>
+              <strong>{matter?.title || 'None selected'}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Documents</span>
+              <strong>{documentCount}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Open tasks</span>
+              <strong>{taskCount}</strong>
+            </div>
           </div>
-          <div className="dialog-actions">
-            <button type="button" onClick={() => handleNavigate('matters')}>Go to matters</button>
-            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          <div className="utility-action-grid">
+            <button type="button" className="utility-action-button primary" onClick={() => { handleNavigate('dashboard'); closeUtilityPanel(); }}>
+              <strong>Dashboard</strong>
+              <span>Workspace overview and recent matters</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('matters'); closeUtilityPanel(); }}>
+              <strong>Matters</strong>
+              <span>Open the selected matter workspace</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('documents'); closeUtilityPanel(); }}>
+              <strong>Documents</strong>
+              <span>Review uploaded matter files</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('review-queue'); closeUtilityPanel(); }}>
+              <strong>Review queue</strong>
+              <span>Drafts and tasks waiting on attention</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('team'); closeUtilityPanel(); }}>
+              <strong>Team</strong>
+              <span>View parties and counsel</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { setIsCreateOpen(true); closeUtilityPanel(); }}>
+              <strong>New matter</strong>
+              <span>Create a fresh matter workspace</span>
+            </button>
           </div>
         </div>
       );
     } else if (utilityPanel === 'search') {
       title = 'Search';
       body = (
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        <div className="utility-panel-body">
+          <p className="utility-panel-intro">
             Search the matter list in this workspace and jump straight into a record.
           </p>
-          <label className="login-field">
-            <span style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 600 }}>Search matters</span>
+          <label className="utility-search-field">
+            <span>Search matters</span>
             <input
               autoFocus
               value={utilityQuery}
@@ -441,19 +476,19 @@ export function App() {
               placeholder="Search by title, case number, court, or jurisdiction"
             />
           </label>
-          <div className="matter-list" style={{ maxHeight: 260, overflow: 'auto' }}>
+          <div className="utility-list">
             {filteredMatters.length ? filteredMatters.map((item) => (
-              <article key={item.matter_id}>
-                <div>
+              <article className="utility-list-item" key={item.matter_id}>
+                <div className="utility-list-copy">
                   <strong>{item.title}</strong>
                   <span>{item.case_number || item.jurisdiction || 'Matter workspace'}</span>
                 </div>
-                <button type="button" className="source-action" onClick={() => { void openMatter(item.matter_id); closeUtilityPanel(); }}>
+                <button type="button" className="utility-action-pill" onClick={() => { void openMatter(item.matter_id); closeUtilityPanel(); }}>
                   Open
                 </button>
               </article>
             )) : (
-              <p style={{ color: 'var(--muted)', fontSize: 12 }}>No matters match your search.</p>
+              <p className="utility-empty-state">No matters match your search.</p>
             )}
           </div>
         </div>
@@ -461,89 +496,103 @@ export function App() {
     } else if (utilityPanel === 'notifications') {
       title = 'Notifications';
       body = (
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        <div className="utility-panel-body">
+          <p className="utility-panel-intro">
             Workspace updates are shown here as quick status cards.
           </p>
-          <div className="matter-list">
-            <article>
-              <div>
-                <strong>Selected matter</strong>
-                <span>{matter?.title || 'None selected'}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Files in scope</strong>
-                <span>{documentCount}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Open tasks</strong>
-                <span>{taskCount}</span>
-              </div>
-            </article>
+          <div className="utility-summary-grid">
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Selected matter</span>
+              <strong>{matter?.title || 'None selected'}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Files in scope</span>
+              <strong>{documentCount}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Open tasks</span>
+              <strong>{taskCount}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Evidence items</span>
+              <strong>{evidenceCount}</strong>
+            </div>
+          </div>
+          <div className="utility-action-grid">
+            <button type="button" className="utility-action-button primary" onClick={openCurrentMatter}>
+              <strong>Open current matter</strong>
+              <span>Jump back into the active workspace</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('dashboard'); closeUtilityPanel(); }}>
+              <strong>View dashboard</strong>
+              <span>See totals and recent matters</span>
+            </button>
           </div>
         </div>
       );
     } else if (utilityPanel === 'context') {
       title = 'Attached context';
       body = (
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        <div className="utility-panel-body">
+          <p className="utility-panel-intro">
             The Case Agent is using the current matter context, if one is selected.
           </p>
-          <div className="matter-list">
-            <article>
-              <div>
-                <strong>Matter</strong>
-                <span>{matter?.title || 'Select a matter first'}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Linked documents</strong>
-                <span>{documentCount}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Linked tasks</strong>
-                <span>{taskCount}</span>
-              </div>
-            </article>
+          <div className="utility-summary-grid">
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Matter</span>
+              <strong>{matter?.title || 'Select a matter first'}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Linked documents</span>
+              <strong>{documentCount}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Linked tasks</span>
+              <strong>{taskCount}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Evidence items</span>
+              <strong>{evidenceCount}</strong>
+            </div>
           </div>
-          <div className="dialog-actions">
-            <button type="button" onClick={() => handleNavigate('matters')}>Open matter workspace</button>
-            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          <div className="utility-action-grid">
+            <button type="button" className="utility-action-button primary" onClick={openCurrentMatter}>
+              <strong>Open matter workspace</strong>
+              <span>Return to the selected matter</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={() => { handleNavigate('documents'); closeUtilityPanel(); }}>
+              <strong>Open documents</strong>
+              <span>Review uploaded files in scope</span>
+            </button>
           </div>
         </div>
       );
     } else if (utilityPanel === 'source') {
       title = 'Canonical source';
       body = (
-        <div style={{ display: 'grid', gap: 12 }}>
-          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        <div className="utility-panel-body">
+          <p className="utility-panel-intro">
             This opens the current source context for the selected matter.
           </p>
-          <div className="matter-list">
-            <article>
-              <div>
-                <strong>Selected matter</strong>
-                <span>{matter?.title || 'No matter selected'}</span>
-              </div>
-            </article>
-            <article>
-              <div>
-                <strong>Evidence items</strong>
-                <span>{(overview?.documents.length ?? 0) + (overview?.research.length ?? 0)}</span>
-              </div>
-            </article>
+          <div className="utility-summary-grid">
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Selected matter</span>
+              <strong>{matter?.title || 'No matter selected'}</strong>
+            </div>
+            <div className="utility-summary-card">
+              <span className="utility-summary-label">Evidence items</span>
+              <strong>{evidenceCount}</strong>
+            </div>
           </div>
-          <div className="dialog-actions">
-            <button type="button" onClick={() => handleNavigate('documents')}>Go to documents</button>
-            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          <div className="utility-action-grid">
+            <button type="button" className="utility-action-button primary" onClick={() => { handleNavigate('documents'); closeUtilityPanel(); }}>
+              <strong>Go to documents</strong>
+              <span>Open the matter file list</span>
+            </button>
+            <button type="button" className="utility-action-button" onClick={openCurrentMatter}>
+              <strong>Open matter</strong>
+              <span>Return to the current workspace</span>
+            </button>
           </div>
         </div>
       );
@@ -555,15 +604,17 @@ export function App() {
         role="presentation"
         onMouseDown={(event) => event.target === event.currentTarget && closeUtilityPanel()}
       >
-        <div className="matter-dialog" role="dialog" aria-modal="true" aria-label={title}>
-          <div>
-            <div className="eyebrow">Workspace</div>
-            <h2>{title}</h2>
+        <div className="matter-dialog utility-panel-dialog" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="utility-panel-header">
+            <div>
+              <div className="eyebrow">Workspace</div>
+              <h2>{title}</h2>
+            </div>
+            <button type="button" className="utility-close" onClick={closeUtilityPanel} aria-label="Close panel">
+              <X size={18} />
+            </button>
           </div>
           {body}
-          <div className="dialog-actions">
-            <button type="button" onClick={closeUtilityPanel}>Close</button>
-          </div>
         </div>
       </div>
     );
