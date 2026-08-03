@@ -3,7 +3,7 @@ import { PanelLeft } from 'lucide-react';
 import { ChatContainer } from './components/ChatContainer';
 import { Message } from './components/ChatMessage';
 import { Sidebar } from './components/Sidebar';
-import { requestBlobWithFallback, requestWithFallback } from './api';
+import { ApiResponseError, requestBlobWithFallback, requestWithFallback } from './api';
 
 interface ChatPageProps {
   embedded?: boolean;
@@ -80,43 +80,41 @@ async function requestChatResponse(
   query: string,
   sessionId?: string | null,
   personalization?: ChatPageProps['personalization'],
+  matterId?: string | null,
 ): Promise<{
   responseText: string;
   sessionId: string | null;
   recommendLegalNotice: boolean;
   noticePrefill: string | null;
 }> {
-  const url = '/chat';
   const init = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ query, session_id: sessionId || null, personalization }),
+    body: JSON.stringify({
+      query,
+      session_id: sessionId || null,
+      matter_id: matterId || null,
+      personalization,
+    }),
   };
 
-  // Use fetch directly so we can inspect the status code for 429.
-  let rawResponse: Response | null = null;
+  let data: ChatResponsePayload;
   try {
-    rawResponse = await fetch(url, init);
-  } catch {
-    // network error — fall through to requestWithFallback below
+    data = await requestWithFallback<ChatResponsePayload>('/chat', () => init);
+  } catch (error) {
+    if (error instanceof ApiResponseError && error.status === 429) {
+      const detail = error.detail as { cooldown_remaining_seconds?: number } | null;
+      const cooldownSeconds = detail?.cooldown_remaining_seconds ?? 0;
+      const hours = Math.max(1, Math.ceil(cooldownSeconds / 3600));
+      throw new Error(
+        `Daily token limit reached. Chat will be available again in approximately ${hours} hour${hours !== 1 ? 's' : ''}. The countdown is shown in the header.`,
+      );
+    }
+    throw error;
   }
-
-  if (rawResponse && rawResponse.status === 429) {
-    let cooldownSeconds = 0;
-    try {
-      const body = await rawResponse.json();
-      cooldownSeconds = body?.detail?.cooldown_remaining_seconds ?? 0;
-    } catch { /* ignore */ }
-    const hours = Math.ceil(cooldownSeconds / 3600);
-    throw new Error(
-      `Daily token limit reached. Chat will be available again in approximately ${hours} hour${hours !== 1 ? 's' : ''}. The countdown is shown in the header.`,
-    );
-  }
-
-  const data = await requestWithFallback<ChatResponsePayload>('/chat', () => init);
 
   const responseText = typeof data?.response === 'string' ? data.response.trim() : '';
   if (!responseText) {
@@ -251,7 +249,13 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     let noticePrefill: string | null = null;
 
     try {
-      const result = await requestChatResponse(authToken, content, activeSessionId, personalization);
+      const result = await requestChatResponse(
+        authToken,
+        content,
+        activeSessionId,
+        personalization,
+        selectedMatterId,
+      );
       responseText = result.responseText;
       returnedSessionId = result.sessionId;
       recommendLegalNotice = result.recommendLegalNotice;

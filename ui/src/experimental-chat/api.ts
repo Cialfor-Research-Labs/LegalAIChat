@@ -1,5 +1,15 @@
 const DEFAULT_CHAT_URL = '/tllac-api/chat';
-const LOCAL_CHAT_URL = 'http://127.0.0.1:9001/chat';
+
+export class ApiResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly detail: unknown,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiResponseError';
+  }
+}
 
 function normalizeChatUrl(url: string): string {
   const trimmed = url.trim().replace(/\/$/, '');
@@ -24,16 +34,8 @@ export function getConfiguredChatUrl(): string | null {
   return normalizeChatUrl(configured);
 }
 
-export function getHostBasedChatUrl(): string {
-  const { protocol, hostname } = window.location;
-  const resolvedProtocol = protocol === 'https:' ? 'https:' : 'http:';
-  const resolvedHostname = hostname || '127.0.0.1';
-  return `${resolvedProtocol}//${resolvedHostname}:9001/chat`;
-}
-
 export function getApiCandidates(): string[] {
   const configuredChatUrl = getConfiguredChatUrl();
-  const hostBasedChatUrl = getHostBasedChatUrl();
   const candidateUrls: string[] = [];
 
   if (configuredChatUrl && !shouldPreferProxy(configuredChatUrl)) {
@@ -42,16 +44,6 @@ export function getApiCandidates(): string[] {
   if (!candidateUrls.includes(DEFAULT_CHAT_URL)) {
     candidateUrls.push(DEFAULT_CHAT_URL);
   }
-  if (!candidateUrls.includes(hostBasedChatUrl)) {
-    candidateUrls.push(hostBasedChatUrl);
-  }
-  if (!candidateUrls.includes(LOCAL_CHAT_URL)) {
-    candidateUrls.push(LOCAL_CHAT_URL);
-  }
-  if (configuredChatUrl && !candidateUrls.includes(configuredChatUrl)) {
-    candidateUrls.push(configuredChatUrl);
-  }
-
   return candidateUrls;
 }
 
@@ -71,18 +63,25 @@ export async function requestWithFallback<T>(
       const response = await fetch(url, initFactory());
       if (!response.ok) {
         let detail = `Request failed with status ${response.status}`;
+        let responseDetail: unknown = null;
         try {
           const errorData = await response.json();
+          responseDetail = errorData?.detail;
           if (typeof errorData?.detail === 'string') {
             detail = errorData.detail;
           }
         } catch {
           // Ignore error-body parsing failures.
         }
-        throw new Error(detail);
+        throw new ApiResponseError(response.status, responseDetail, detail);
       }
       return (await response.json()) as T;
     } catch (error) {
+      // An HTTP response proves that the backend was reached. Retrying a write
+      // against another host can duplicate it and hides the original error.
+      if (error instanceof ApiResponseError) {
+        throw error;
+      }
       lastError = error;
     }
   }
@@ -101,7 +100,11 @@ export async function requestBlobWithFallback(
     try {
       const response = await fetch(url, initFactory());
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
+        throw new ApiResponseError(
+          response.status,
+          null,
+          `Request failed with status ${response.status}`,
+        );
       }
       const disposition = response.headers.get('content-disposition') || '';
       const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
@@ -110,6 +113,9 @@ export async function requestBlobWithFallback(
         filename: filenameMatch?.[1] ?? null,
       };
     } catch (error) {
+      if (error instanceof ApiResponseError) {
+        throw error;
+      }
       lastError = error;
     }
   }
