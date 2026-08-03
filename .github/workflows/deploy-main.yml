@@ -84,8 +84,6 @@ jobs:
 
       - name: Build V1 frontend
         working-directory: v1
-        env:
-          VITE_V1_API_BASE: /tllac-api
         run: npm run build
 
       # ----------------------------------
