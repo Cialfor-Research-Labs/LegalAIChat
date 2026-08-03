@@ -9,7 +9,7 @@ import logging
 from typing import Any, Callable
 
 from ..db.db_client import db_client
-from .legal_rag_service import retrieve_legal_rag_result
+from .legal_rag_service import build_legal_rag_context_from_result, retrieve_legal_rag_result
 
 logger = logging.getLogger("tllac.services.agent_tools")
 
@@ -54,11 +54,11 @@ def search_matter_documents_tool(user_id: str, matter_id: str, query: str = "", 
 def search_legal_corpus_tool(query: str = "", **kwargs: Any) -> dict[str, Any]:
     """Search statutes and case-law corpus via Legal RAG service."""
     if not query:
-        return {"authorities": [], "context_block": ""}
+        return {"statute_matches": [], "case_matches": [], "context_block": ""}
     rag_res = retrieve_legal_rag_result(query)
     return {
         "query": query,
-        "authorities": [
+        "statute_matches": [
             {
                 "authority_type": auth.authority_type,
                 "title": auth.title,
@@ -66,9 +66,20 @@ def search_legal_corpus_tool(query: str = "", **kwargs: Any) -> dict[str, Any]:
                 "summary": auth.summary,
                 "score": auth.score,
             }
-            for auth in rag_res.authorities
+            for auth in rag_res.statute_matches
         ],
-        "context_block": rag_res.context_block,
+        "case_matches": [
+            {
+                "authority_type": auth.authority_type,
+                "title": auth.title,
+                "reference": auth.reference,
+                "summary": auth.summary,
+                "score": auth.score,
+            }
+            for auth in rag_res.case_matches
+        ],
+        "context_block": build_legal_rag_context_from_result(rag_res),
+        "confidence": rag_res.confidence,
     }
 
 

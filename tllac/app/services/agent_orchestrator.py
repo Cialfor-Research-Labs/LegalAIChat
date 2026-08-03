@@ -6,14 +6,22 @@ state lifecycle transitions, token cost bounds, and auditable tool execution.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import logging
 import re
 from typing import Any
 
 from ..db.db_client import db_client
 from .agent_models import AgentCommand, AgentRunResponse, AgentRunState, ToolCallRecord
-from .agent_tools import execute_approved_tool
-from .bedrock_llm_service import generate_response
+from .agent_command_service import (
+    build_brief_preview,
+    build_draft_preview,
+    build_next_preview,
+    build_review_report,
+    build_timeline_preview,
+    command_enabled,
+)
+from .research_service import run_research
 from .matter_context_service import matter_context_service
 
 logger = logging.getLogger("tllac.services.agent_orchestrator")
@@ -158,96 +166,210 @@ class AgentOrchestrator:
             output_text = ""
             final_state = AgentRunState.COMPLETED
 
-            if command == AgentCommand.TIMELINE:
-                # Deterministic execution (0 Bedrock tokens)
+            if not command_enabled(command.value):
+                final_state = AgentRunState.FAILED
+                output_text = f"{command.value} is disabled until advanced agent commands are enabled."
+
+            elif command == AgentCommand.TIMELINE:
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.ANALYZING.value,
                 )
-                events = log_and_exec_tool("save_timeline", {"event_type": "view", "title": "Timeline Requested", "description": query or "Viewed timeline"})
-                all_events = db_client.list_matter_events(user_id, matter_id)
-                output_text = f"### Matter Timeline: {context.title}\n\n"
-                if not all_events:
-                    output_text += "No timeline events recorded yet.\n"
-                else:
-                    output_text += "| Date/Time | Event Type | Title | Description |\n"
-                    output_text += "| --- | --- | --- | --- |\n"
-                    for ev in all_events:
-                        output_text += f"| {ev.get('event_at', '')[:16]} | {ev.get('event_type', '')} | {ev.get('title', '')} | {ev.get('description', '')} |\n"
+                preview = build_timeline_preview(user_id, matter_id)
+                output_text = f"### Matter Timeline: {preview['title']}\n\n"
+                events = preview.get("events", [])
+                hearings = preview.get("hearings", [])
+                tasks = preview.get("tasks", [])
+                notes = preview.get("notes", [])
+                documents = preview.get("documents", [])
+                output_text += f"Events: {len(events)} | Hearings: {len(hearings)} | Tasks: {len(tasks)} | Notes: {len(notes)} | Documents: {len(documents)}\n"
+                if events:
+                    output_text += "\n#### Recent Events\n"
+                    for event in events[:8]:
+                        output_text += f"- {event.get('event_type', 'event')}: {event.get('title', '')} ({event.get('created_at', event.get('event_at', ''))})\n"
+                if hearings:
+                    output_text += "\n#### Hearings\n"
+                    for hearing in hearings[:8]:
+                        output_text += f"- {hearing.get('title', 'Hearing')} on {hearing.get('hearing_at', 'TBD')} ({hearing.get('court', 'N/A')})\n"
+                if tasks:
+                    output_text += "\n#### Tasks\n"
+                    for task in tasks[:8]:
+                        output_text += f"- [{task.get('status', 'open')}] {task.get('title', '')}\n"
 
             elif command == AgentCommand.NEXT:
-                # Deterministic aggregation of open tasks and upcoming hearings
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.ANALYZING.value,
                 )
-                tasks = log_and_exec_tool("get_tasks", {})
-                hearings = log_and_exec_tool("get_hearings", {})
-                
-                output_text = f"### Next Action Items for {context.title}\n\n"
+                preview = build_next_preview(user_id, matter_id)
+                output_text = f"### Next Action Items for {preview['title']}\n\n"
+                hearings = preview.get("hearings", [])
+                deadlines = preview.get("deadlines", [])
+                tasks = preview.get("tasks", [])
                 output_text += "#### Upcoming Hearings:\n"
                 if hearings:
-                    for h in hearings:
-                        output_text += f"- **{h.get('title')}** on {h.get('hearing_at', 'TBD')} ({h.get('court', 'N/A')})\n"
+                    for hearing in hearings:
+                        output_text += f"- **{hearing.get('title', 'Hearing')}** on {hearing.get('hearing_at', 'TBD')} ({hearing.get('court', 'N/A')})\n"
                 else:
-                    output_text += "- No upcoming hearings scheduled.\n\n"
+                    output_text += "- No upcoming hearings scheduled.\n"
 
-                output_text += "#### Open Tasks:\n"
+                output_text += "\n#### Deadlines:\n"
+                if deadlines:
+                    for deadline in deadlines:
+                        output_text += f"- {deadline.get('title', 'Deadline')} due {deadline.get('due_at', 'TBD')} [{deadline.get('priority', 'normal')}]\n"
+                else:
+                    output_text += "- No deadlines identified.\n"
+
+                output_text += "\n#### Open Tasks:\n"
                 if tasks:
-                    for t in tasks:
-                        output_text += f"- [{t.get('priority', 'normal').upper()}] **{t.get('title')}** (Due: {t.get('due_at', 'N/A')}) - {t.get('description')}\n"
+                    for task in tasks:
+                        output_text += f"- [{task.get('priority', 'normal').upper()}] {task.get('title', '')}\n"
                 else:
                     output_text += "- No pending tasks.\n"
 
             elif command == AgentCommand.DIARY:
-                # Deterministic tool call to create/manage diary entries
+                db_client.update_agent_run(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    agent_run_id=agent_run_id,
+                    status=AgentRunState.REVIEW_REQUIRED.value,
+                )
+                preview = {
+                    "date": datetime.now(timezone.utc).date().isoformat(),
+                    "duration": "unspecified",
+                    "category": "diary",
+                    "description": query or raw_input,
+                    "follow_up_task": "Confirm and save the diary entry from the diary preview endpoint.",
+                    "read_only": True,
+                }
+                output_text = json.dumps(preview, indent=2, ensure_ascii=False)
+
+            elif command == AgentCommand.DRAFT:
+                db_client.update_agent_run(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    agent_run_id=agent_run_id,
+                    status=AgentRunState.ANALYZING.value,
+                )
+                verified_research = [
+                    research
+                    for research in db_client.list_matter_research(user_id, matter_id)
+                    if str(research.get("verification_status") or "").lower() == "verified"
+                ]
+                draft_text, tokens_used = build_draft_preview(
+                    user_id,
+                    matter_id,
+                    document_type="legal_draft",
+                    document_type_label="Legal Draft",
+                    case_details=query or context.description or context.title,
+                    relevant_info="\n".join(
+                        f"- {item.get('title', 'Verified research')}: {str(item.get('content') or '')[:400]}"
+                        for item in verified_research
+                    ),
+                    skill_name="agent-draft",
+                    skill_prompt="",
+                )
+                total_tokens += tokens_used
+                output_text = draft_text
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.COMMITTING.value,
                 )
-                entry_title = query or "Matter Activity Entry"
-                res = log_and_exec_tool(
-                    "create_draft_diary_or_task_entry",
-                    {
-                        "title": entry_title,
-                        "description": f"Created via agent /diary command: {raw_input}",
-                        "entry_type": "task",
-                    },
-                )
-                output_text = f"Successfully recorded diary entry:\n- **Title**: {entry_title}\n- **ID**: {res.get('task_id') or res.get('hearing_id')}"
-
-            elif command == AgentCommand.RESEARCH:
-                # Retrieving -> Analyzing -> Verifying -> Committing -> Completed
-                db_client.update_agent_run(
+                draft = db_client.create_matter_draft(
                     user_id=user_id,
                     matter_id=matter_id,
-                    agent_run_id=agent_run_id,
-                    status=AgentRunState.RETRIEVING.value,
+                    title=f"Draft: {query[:40] if query else context.title}",
+                    document_type="legal_draft",
                 )
-                corpus_res = log_and_exec_tool("search_legal_corpus", {"query": query or context.title})
-                doc_res = log_and_exec_tool("search_matter_documents", {"query": query or context.title})
+                db_client.create_draft_version(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    draft_id=draft["draft_id"],
+                    content=output_text,
+                    citations=[
+                        {
+                            "source_id": research.get("research_id"),
+                            "title": research.get("title", ""),
+                        }
+                        for research in verified_research
+                    ],
+                )
 
+            elif command == AgentCommand.REVIEW:
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.ANALYZING.value,
                 )
-                prompt = (
-                    f"Perform legal research for matter '{context.title}'.\n"
-                    f"Query: {query or 'General research'}\n"
-                    f"Statutes & Authorities: {corpus_res.get('context_block', '')}\n"
-                    f"Matter Documents Match Count: {len(doc_res)}\n"
-                    "Provide a clear, structured research memorandum."
+                preview = build_review_report(
+                    user_id,
+                    matter_id,
+                    source_type="document" if query else "research",
+                    source_id=query,
+                    query=query,
                 )
-                output_text, tokens_used = generate_response(prompt)
-                total_tokens += tokens_used
+                output_text = json.dumps(preview, indent=2, ensure_ascii=False)
+                final_state = AgentRunState.REVIEW_REQUIRED
+
+            elif command == AgentCommand.BRIEF:
+                db_client.update_agent_run(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    agent_run_id=agent_run_id,
+                    status=AgentRunState.ANALYZING.value,
+                )
+                preview = build_brief_preview(user_id, matter_id)
+                output_text = preview.get("brief_text", "")
+                draft = db_client.create_matter_draft(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    title=str(preview.get("title") or "Hearing Brief"),
+                    document_type="brief",
+                )
+                db_client.create_draft_version(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    draft_id=draft["draft_id"],
+                    content=output_text,
+                    citations=[
+                        {
+                            "source_id": research.get("research_id"),
+                            "title": research.get("title", ""),
+                        }
+                        for research in preview.get("verified_research", [])
+                    ],
+                )
+
+            elif command == AgentCommand.RESEARCH:
+                # Retrieving -> Analyzing -> Verifying -> Committing -> Completed/Review Required
+                db_client.update_agent_run(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    agent_run_id=agent_run_id,
+                    status=AgentRunState.RETRIEVING.value,
+                )
+                db_client.update_agent_run(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    agent_run_id=agent_run_id,
+                    status=AgentRunState.ANALYZING.value,
+                )
+                research_query = query or context.title
+                research_result = run_research(
+                    user_id=user_id,
+                    matter_id=matter_id,
+                    query=research_query,
+                    conversation_history=conversation_history,
+                )
+                output_text = research_result.output_text
+                total_tokens += research_result.tokens_used
 
                 # Verifying
                 db_client.update_agent_run(
@@ -258,20 +380,16 @@ class AgentOrchestrator:
                 )
 
                 # Committing
+                if research_result.verification.verified and research_result.saved_research:
+                    final_state = AgentRunState.COMPLETED
+                else:
+                    final_state = AgentRunState.REVIEW_REQUIRED
+
                 db_client.update_agent_run(
                     user_id=user_id,
                     matter_id=matter_id,
                     agent_run_id=agent_run_id,
                     status=AgentRunState.COMMITTING.value,
-                )
-                log_and_exec_tool(
-                    "save_research",
-                    {
-                        "title": f"Research: {query[:50] if query else context.title}",
-                        "query": query or context.title,
-                        "content": output_text,
-                        "evidence": corpus_res.get("authorities", []),
-                    },
                 )
 
             elif command == AgentCommand.DRAFT:

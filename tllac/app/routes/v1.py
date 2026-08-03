@@ -10,6 +10,16 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from ..db.db_client import db_client
+from ..services.agent_command_service import (
+    advanced_commands_enabled,
+    build_brief_preview,
+    build_draft_preview,
+    build_next_preview,
+    build_review_report,
+    build_timeline_preview,
+    compare_text_versions,
+)
 from ..services.auth_service import create_access_token, get_current_user
 from ..services.bedrock_llm_service import generate_response
 
@@ -25,18 +35,70 @@ def _load_store() -> dict[str, Any]:
     try:
         return json.loads(_store_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"matters": {}, "feedback": {}, "verified": {}}
+        return {"matters": {}, "feedback": {}, "verified": {}, "pending_actions": {}, "idempotency": {}}
 
 
 _store = _load_store()
 _matters: dict[str, dict[str, dict[str, Any]]] = _store["matters"]
 _feedback: dict[str, list[dict[str, Any]]] = _store["feedback"]
 _verified: dict[str, set[str]] = {key: set(value) for key, value in _store.get("verified", {}).items()}
+_pending_actions: dict[str, dict[str, Any]] = _store.get("pending_actions", {})
+_idempotency: dict[str, str] = _store.get("idempotency", {})
 
 
 def _persist() -> None:
     with _store_lock:
-        _store_path.write_text(json.dumps({"matters": _matters, "feedback": _feedback, "verified": {key: list(value) for key, value in _verified.items()}}, ensure_ascii=False), encoding="utf-8")
+        _store_path.parent.mkdir(parents=True, exist_ok=True)
+        _store_path.write_text(
+            json.dumps(
+                {
+                    "matters": _matters,
+                    "feedback": _feedback,
+                    "verified": {key: list(value) for key, value in _verified.items()},
+                    "pending_actions": _pending_actions,
+                    "idempotency": _idempotency,
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+
+def _require_advanced_commands() -> None:
+    if not advanced_commands_enabled():
+        raise HTTPException(status_code=503, detail="Advanced agent commands are disabled until research verification is enabled.")
+
+
+def _preview_key(user_id: str, matter_id: str, action: str, payload: dict[str, Any]) -> str:
+    material = json.dumps({"user_id": user_id, "matter_id": matter_id, "action": action, "payload": payload}, sort_keys=True, default=str)
+    return uuid4().hex if not material else uuid4().hex
+
+
+def _store_preview(user_id: str, matter_id: str, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    token = uuid4().hex
+    _pending_actions[token] = {
+        "user_id": user_id,
+        "matter_id": matter_id,
+        "action": action,
+        "payload": payload,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _persist()
+    return {"preview_token": token, **payload}
+
+
+def _consume_preview(token: str, user_id: str, matter_id: str, action: str) -> dict[str, Any]:
+    pending = _pending_actions.get(token)
+    if not pending:
+        raise HTTPException(status_code=404, detail="Preview token not found.")
+    if pending.get("user_id") != user_id or pending.get("matter_id") != matter_id or pending.get("action") != action:
+        raise HTTPException(status_code=403, detail="Preview token does not match this action.")
+    return pending["payload"]
+
+
+def _record_idempotency(key: str, result_id: str) -> None:
+    _idempotency[key] = result_id
+    _persist()
 
 
 def _legal_sources(query: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -53,6 +115,21 @@ def _legal_sources(query: str, limit: int = 5) -> list[dict[str, Any]]:
         if len(matches) >= limit:
             break
     return matches
+
+
+def _verified_research_source_ids(user_id: str, matter_id: str) -> set[str]:
+    source_ids: set[str] = set()
+    for research in db_client.list_matter_research(user_id, matter_id):
+        if str(research.get("verification_status") or "").lower() != "verified":
+            continue
+        research_id = str(research.get("research_id") or "").strip()
+        if research_id:
+            source_ids.add(research_id)
+        for evidence_item in research.get("evidence") or []:
+            source_id = str((evidence_item or {}).get("source_id") or "").strip()
+            if source_id:
+                source_ids.add(source_id)
+    return source_ids
 
 
 def _resolve_document_location(text: str, location: str) -> str:
@@ -94,6 +171,27 @@ class AgentRun(BaseModel):
     matter_id: str
     prompt: str = Field(min_length=2, max_length=4000)
     context: list[str] = []
+
+
+class ResearchRunRequest(BaseModel):
+    query: str = Field(default="", max_length=4000)
+    conversation_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ResearchRunResponse(BaseModel):
+    matter_id: str
+    query: str
+    verified: bool
+    review_required: bool
+    memo_title: str
+    memo_text: str
+    confidence: float
+    saved_research: dict[str, Any] | None = None
+    evidence_sources: list[dict[str, Any]] = Field(default_factory=list)
+    claims: list[dict[str, Any]] = Field(default_factory=list)
+    source_mappings: list[dict[str, Any]] = Field(default_factory=list)
+    rejected_claims: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 @router.post("/launch")
@@ -260,11 +358,345 @@ def save_research(matter_id: str, payload: ItemCreate, current_user: dict[str, s
     return item
 
 
+@router.get("/matters/{matter_id}/research")
+def list_research(matter_id: str, current_user: dict[str, str] = Depends(get_current_user)):
+    try:
+        research_items = db_client.list_matter_research(current_user["user_id"], matter_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"items": research_items}
+
+
+@router.get("/matters/{matter_id}/next")
+def next_command(matter_id: str, current_user: dict[str, str] = Depends(get_current_user)):
+    return build_next_preview(current_user["user_id"], matter_id)
+
+
+@router.post("/matters/{matter_id}/timeline/preview")
+def timeline_preview(matter_id: str, current_user: dict[str, str] = Depends(get_current_user)):
+    preview = build_timeline_preview(current_user["user_id"], matter_id)
+    return _store_preview(current_user["user_id"], matter_id, "timeline", preview)
+
+
+@router.post("/matters/{matter_id}/timeline/confirm")
+def timeline_confirm(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    preview_token = str(payload.get("preview_token") or "").strip()
+    if not preview_token:
+        raise HTTPException(status_code=422, detail="preview_token is required.")
+    if not bool(payload.get("confirmed", False)):
+        raise HTTPException(status_code=409, detail="Timeline save requires explicit confirmation.")
+    preview = _consume_preview(preview_token, current_user["user_id"], matter_id, "timeline")
+    item = {
+        "id": uuid4().hex,
+        "title": preview.get("title", "Timeline"),
+        "body": json.dumps(preview, ensure_ascii=False),
+        "status": "confirmed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _matter(current_user["user_id"], matter_id)["tabs"]["timeline"].append(item)
+    _persist()
+    return item
+
+
+@router.post("/matters/{matter_id}/draft/preview")
+def draft_preview(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    document_type = str(payload.get("document_type") or "written-statement")
+    document_type_label = str(payload.get("document_type_label") or document_type.replace("-", " ").title())
+    case_details = str(payload.get("case_details") or "")
+    draft_text, tokens_used = build_draft_preview(
+        current_user["user_id"],
+        matter_id,
+        document_type=document_type,
+        document_type_label=document_type_label,
+        case_details=case_details,
+        party_details=str(payload.get("party_details") or ""),
+        recipient_details=str(payload.get("recipient_details") or ""),
+        relevant_info=str(payload.get("relevant_info") or ""),
+        additional_info=str(payload.get("additional_info") or ""),
+        structured_fields=dict(payload.get("structured_fields") or {}),
+        structured_sections=list(payload.get("structured_sections") or []),
+        skill_name=str(payload.get("skill_name") or ""),
+        skill_prompt=str(payload.get("skill_prompt") or ""),
+    )
+    preview = {
+        "document_type": document_type,
+        "document_type_label": document_type_label,
+        "draft_text": draft_text,
+        "tokens_used": tokens_used,
+    }
+    return _store_preview(current_user["user_id"], matter_id, "draft", preview)
+
+
+@router.post("/matters/{matter_id}/draft/confirm")
+def draft_confirm(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    preview_token = str(payload.get("preview_token") or "").strip()
+    if not preview_token:
+        raise HTTPException(status_code=422, detail="preview_token is required.")
+    if not bool(payload.get("confirmed", False)):
+        raise HTTPException(status_code=409, detail="Draft save requires explicit confirmation.")
+    preview = _consume_preview(preview_token, current_user["user_id"], matter_id, "draft")
+    draft_parent_id = str(payload.get("draft_id") or "").strip()
+    if draft_parent_id:
+        existing = next(
+            (row for row in db_client.list_matter_drafts(current_user["user_id"], matter_id) if row["draft_id"] == draft_parent_id),
+            None,
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Draft not found.")
+    else:
+        parent = db_client.create_matter_draft(
+            user_id=current_user["user_id"],
+            matter_id=matter_id,
+            title=str(payload.get("title") or preview.get("document_type_label") or "Draft"),
+            document_type=str(payload.get("document_type") or preview.get("document_type") or "document"),
+        )
+        draft_parent_id = parent["draft_id"]
+    citations_payload = list(payload.get("citations") or [])
+    verified_source_ids = _verified_research_source_ids(current_user["user_id"], matter_id)
+    validated_citations: list[dict[str, Any]] = []
+    for citation in citations_payload:
+        source_id = str((citation or {}).get("source_id") or "").strip()
+        if not source_id:
+            raise HTTPException(status_code=422, detail="Each citation must include a source_id.")
+        if source_id not in verified_source_ids:
+            raise HTTPException(status_code=409, detail=f"Unknown or unverified source_id: {source_id}")
+        validated_citations.append(
+            {
+                **citation,
+                "source_id": source_id,
+            }
+        )
+    if not validated_citations:
+        validated_citations = [{"source_id": source_id} for source_id in sorted(verified_source_ids)]
+    version = db_client.create_draft_version(
+        user_id=current_user["user_id"],
+        matter_id=matter_id,
+        draft_id=draft_parent_id,
+        content=str(preview.get("draft_text") or ""),
+        citations=validated_citations,
+    )
+    return {"draft_id": draft_parent_id, "version": version, "preview": preview}
+
+
+@router.get("/matters/{matter_id}/drafts/{draft_id}/versions")
+def list_draft_versions_route(
+    matter_id: str,
+    draft_id: str,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    return {"items": db_client.list_draft_versions(current_user["user_id"], matter_id, draft_id)}
+
+
+@router.get("/matters/{matter_id}/drafts/{draft_id}/versions/compare")
+def compare_draft_versions_route(
+    matter_id: str,
+    draft_id: str,
+    left_version: int,
+    right_version: int,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    versions = db_client.list_draft_versions(current_user["user_id"], matter_id, draft_id)
+    left = next((item for item in versions if int(item.get("version_number", 0)) == int(left_version)), None)
+    right = next((item for item in versions if int(item.get("version_number", 0)) == int(right_version)), None)
+    if not left or not right:
+        raise HTTPException(status_code=404, detail="Draft version not found.")
+    return {
+        "left_version": left_version,
+        "right_version": right_version,
+        "diff": compare_text_versions(str(left.get("content") or ""), str(right.get("content") or "")),
+    }
+
+
+@router.post("/matters/{matter_id}/review")
+def review_command(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    source_type = str(payload.get("source_type") or "document")
+    source_id = str(payload.get("source_id") or "")
+    query = str(payload.get("query") or "")
+    if not source_id:
+        raise HTTPException(status_code=422, detail="source_id is required.")
+    return build_review_report(
+        current_user["user_id"],
+        matter_id,
+        source_type=source_type,
+        source_id=source_id,
+        query=query,
+    )
+
+
+@router.post("/matters/{matter_id}/brief/preview")
+def brief_preview(matter_id: str, current_user: dict[str, str] = Depends(get_current_user)):
+    _require_advanced_commands()
+    preview = build_brief_preview(current_user["user_id"], matter_id)
+    return _store_preview(current_user["user_id"], matter_id, "brief", preview)
+
+
+@router.post("/matters/{matter_id}/brief/confirm")
+def brief_confirm(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    preview_token = str(payload.get("preview_token") or "").strip()
+    if not preview_token:
+        raise HTTPException(status_code=422, detail="preview_token is required.")
+    if not bool(payload.get("confirmed", False)):
+        raise HTTPException(status_code=409, detail="Brief save requires explicit confirmation.")
+    preview = _consume_preview(preview_token, current_user["user_id"], matter_id, "brief")
+    draft = db_client.create_matter_draft(
+        user_id=current_user["user_id"],
+        matter_id=matter_id,
+        title=str(preview.get("title") or "Hearing Brief"),
+        document_type="brief",
+    )
+    version = db_client.create_draft_version(
+        user_id=current_user["user_id"],
+        matter_id=matter_id,
+        draft_id=draft["draft_id"],
+        content=str(preview.get("brief_text") or ""),
+        citations=[],
+    )
+    return {"draft_id": draft["draft_id"], "version": version, "preview": preview}
+
+
+@router.post("/matters/{matter_id}/diary/preview")
+def diary_preview(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    preview = {
+        "date": str(payload.get("date") or ""),
+        "duration": str(payload.get("duration") or ""),
+        "category": str(payload.get("category") or ""),
+        "description": str(payload.get("description") or ""),
+        "follow_up_task": str(payload.get("follow_up_task") or ""),
+    }
+    return _store_preview(current_user["user_id"], matter_id, "diary", preview)
+
+
+@router.post("/matters/{matter_id}/diary/confirm")
+def diary_confirm(
+    matter_id: str,
+    payload: dict[str, Any],
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    _require_advanced_commands()
+    preview_token = str(payload.get("preview_token") or "").strip()
+    idempotency_key = str(payload.get("idempotency_key") or "").strip()
+    if not preview_token:
+        raise HTTPException(status_code=422, detail="preview_token is required.")
+    if not idempotency_key:
+        raise HTTPException(status_code=422, detail="idempotency_key is required.")
+    ledger_key = f"{current_user['user_id']}:{matter_id}:diary:{idempotency_key}"
+    if ledger_key in _idempotency:
+        return {"ok": True, "duplicate": True, "result_id": _idempotency[ledger_key]}
+    preview = _consume_preview(preview_token, current_user["user_id"], matter_id, "diary")
+    entry = db_client.create_matter_task(
+        user_id=current_user["user_id"],
+        matter_id=matter_id,
+        title=f"Diary: {preview.get('category') or 'Entry'}",
+        description=f"{preview.get('date')} | {preview.get('duration')} | {preview.get('description')} | Follow-up: {preview.get('follow_up_task')}",
+        due_at=None,
+    )
+    _idempotency[ledger_key] = entry.get("task_id", "")
+    _persist()
+    return {"ok": True, "result": entry, "preview": preview}
+
+
+@router.post("/matters/{matter_id}/research", response_model=ResearchRunResponse)
+def run_research_endpoint(
+    matter_id: str,
+    payload: ResearchRunRequest,
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    try:
+        from ..services.research_service import run_research
+
+        result = run_research(
+            user_id=current_user["user_id"],
+            matter_id=matter_id,
+            query=payload.query.strip() or _matter(current_user["user_id"], matter_id)["title"],
+            conversation_history=payload.conversation_history,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ResearchRunResponse(
+        matter_id=matter_id,
+        query=result.query,
+        verified=result.verification.verified,
+        review_required=result.verification.review_required,
+        memo_title=result.verification.memo_title,
+        memo_text=result.verification.memo_text,
+        confidence=result.verification.confidence,
+        saved_research=result.saved_research,
+        evidence_sources=[source.to_dict() for source in result.evidence_sources],
+        claims=[{
+            "claim_id": claim.claim_id,
+            "text": claim.text,
+            "source_ids": claim.source_ids,
+            "source_locations": claim.source_locations,
+            "material": claim.material,
+            "confidence": claim.confidence,
+            "claim_type": claim.claim_type,
+        } for claim in result.verification.claims],
+        source_mappings=[
+            {
+                "source_id": mapping.source_id,
+                "claim_ids": mapping.claim_ids,
+                "support": mapping.support,
+            }
+            for mapping in result.verification.source_mappings
+        ],
+        rejected_claims=result.verification.rejected_claims,
+        notes=result.verification.notes,
+    )
+
+
 @router.post("/agent/feedback")
 def agent_feedback(payload: dict[str, Any], current_user: dict[str, str] = Depends(get_current_user)):
-    value = payload.get("value")
-    if value not in {"useful", "not_useful"}:
+    value = str(payload.get("value") or "").strip()
+    category = str(payload.get("category") or payload.get("feedback_category") or "").strip().lower()
+    artifact_type = str(payload.get("artifact_type") or payload.get("command_type") or "research").strip().lower()
+    allowed_categories = {"citation issue", "missing authority", "source issue", "drafting issue"}
+    allowed_artifacts = {"research", "draft", "review", "brief"}
+    if value not in {"useful", "not_useful", ""}:
         raise HTTPException(status_code=422, detail="Feedback value must be useful or not_useful.")
-    _feedback.setdefault(current_user["user_id"], []).append({"value": value, "matter_id": payload.get("matter_id"), "created_at": datetime.now(timezone.utc).isoformat()})
+    if category and category not in allowed_categories:
+        raise HTTPException(status_code=422, detail="Unsupported feedback category.")
+    if artifact_type and artifact_type not in allowed_artifacts:
+        raise HTTPException(status_code=422, detail="Unsupported feedback artifact type.")
+    record = {
+        "value": value or None,
+        "category": category or None,
+        "artifact_type": artifact_type,
+        "matter_id": payload.get("matter_id"),
+        "research_id": payload.get("research_id"),
+        "draft_id": payload.get("draft_id"),
+        "comment": payload.get("comment", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _feedback.setdefault(current_user["user_id"], []).append(record)
     _persist()
-    return {"ok": True}
+    return {"ok": True, "feedback": record}
