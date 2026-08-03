@@ -1,12 +1,21 @@
-from __future__ import annotations
-
+import io
+import json
+import logging
+import re
+import zipfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
+from pypdf import PdfReader
 
 from ..db.db_client import db_client
 from ..services.auth_service import get_current_user
+from ..services.bedrock_llm_service import generate_response
+
+logger = logging.getLogger("tllac.routes.matters")
 
 router = APIRouter(prefix="/v1/matters", tags=["matters"])
 
@@ -246,6 +255,132 @@ def _matter_list(
         recent_window=recent_window,
     )
     return _filter_archive_state(rows, state)
+
+
+@router.post("/parse-document")
+async def parse_matter_document(
+    file: UploadFile = File(...),
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    """
+    Parse an uploaded document (.pdf, .doc, .docx, .txt) and extract matter fields
+    (title, description, case_number, court, jurisdiction, stage) to auto-fill the
+    matter creation form.
+    """
+    filename = file.filename or "document.txt"
+    ext = Path(filename).suffix.lower()
+    if ext not in {".pdf", ".doc", ".docx", ".txt"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .pdf, .doc, .docx, and .txt files are supported.",
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+
+    raw_text = ""
+    try:
+        if ext == ".pdf":
+            reader = PdfReader(io.BytesIO(content))
+            pages = [page.extract_text() or "" for page in reader.pages[:10]]
+            raw_text = "\n".join(pages).strip()
+        elif ext in {".docx", ".doc"}:
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                    if "word/document.xml" in archive.namelist():
+                        with archive.open("word/document.xml") as handle:
+                            root = ET.parse(handle).getroot()
+                            pieces = [node.text or "" for node in root.findall(".//w:t", {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"})]
+                            raw_text = " ".join(pieces).strip()
+            except Exception:
+                utf16_matches = [m.decode("utf-16le", errors="ignore").strip() for m in re.findall(rb'(?:[\x20-\x7E]\x00){4,}', content)]
+                ascii_matches = [m.decode("latin-1", errors="ignore").strip() for m in re.findall(rb'[\x20-\x7E\t\r\n]{4,}', content)]
+                all_pieces = [p for p in (utf16_matches + ascii_matches) if len(p) > 3 and not p.startswith("Root Entry")]
+                raw_text = "\n".join(all_pieces).strip()
+
+        elif ext == ".txt":
+            raw_text = content.decode("utf-8", errors="replace").strip()
+    except Exception as exc:
+        logger.warning("Error reading file %s: %s", filename, exc)
+        raw_text = ""
+
+    if not raw_text:
+        stem = Path(filename).stem.replace("_", " ").replace("-", " ").title()
+        return {
+            "title": stem or "New Matter",
+            "description": f"Extracted from {filename}",
+            "case_number": None,
+            "court": None,
+            "jurisdiction": None,
+            "stage": None,
+        }
+
+    # Attempt LLM extraction for high quality structured details
+    try:
+        prompt = (
+            "You are a legal document parser. Extract key matter details from this document text.\n"
+            "Return ONLY a JSON object (no markdown formatting, no extra code block text) with these keys:\n"
+            '- "title": A concise title for the case or matter (max 120 chars)\n'
+            '- "description": A short 2-3 sentence summary of the facts, claims, or document purpose\n'
+            '- "case_number": Any case number, FIR number, or notice reference if mentioned (or null if not found)\n'
+            '- "court": Name of the court, tribunal, or legal authority if mentioned (or null if not found)\n'
+            '- "jurisdiction": City, state, or legal jurisdiction if mentioned (or null if not found)\n'
+            '- "stage": Estimated case stage if mentioned, e.g. "Notice", "Initial", "Pleading", "Evidence", "Trial" (or null if not found)\n\n'
+            f"Document text:\n{raw_text[:4000]}"
+        )
+        llm_response, _ = generate_response(prompt, conversation_history=[])
+        
+        clean_json = llm_response.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json[7:]
+        if clean_json.startswith("```"):
+            clean_json = clean_json[3:]
+        if clean_json.endswith("```"):
+            clean_json = clean_json[:-3]
+        
+        data = json.loads(clean_json.strip())
+        if isinstance(data, dict) and data.get("title"):
+            return {
+                "title": str(data.get("title") or "").strip()[:300],
+                "description": str(data.get("description") or "").strip()[:10000],
+                "case_number": str(data.get("case_number") or "").strip() or None,
+                "court": str(data.get("court") or "").strip() or None,
+                "jurisdiction": str(data.get("jurisdiction") or "").strip() or None,
+                "stage": str(data.get("stage") or "").strip() or None,
+            }
+    except Exception as exc:
+        logger.warning("LLM extraction failed for %s, using heuristic fallback: %s", filename, exc)
+
+    # Heuristic fallback
+    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    first_line = lines[0] if lines else Path(filename).stem
+    title = first_line[:100] if len(first_line) > 3 else Path(filename).stem.replace("_", " ").replace("-", " ").title()
+    desc = raw_text[:500].strip()
+
+    case_num = None
+    case_num_match = re.search(r'\b(?:case|fir|suit|wp|crl|appeal|ref)\s*(?:no\.?|number)?\s*[:#]*[ \t]*([a-z0-9/_-]+(?:[ \t]+[a-z0-9/_-]+)*)', raw_text, re.I)
+    if case_num_match:
+        candidate = case_num_match.group(1).strip()
+        if any(char.isdigit() for char in candidate):
+            case_num = candidate[:40]
+
+
+
+    court_match = re.search(r'(high court|supreme court|district court|tribunal|sessions court|family court|magistrate)', raw_text, re.I)
+    
+    return {
+        "title": title,
+        "description": desc,
+        "case_number": case_num,
+        "court": court_match.group(1).title() if court_match else None,
+        "jurisdiction": None,
+        "stage": "Initial",
+    }
+
 
 
 @router.post("", response_model=dict[str, Any])

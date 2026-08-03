@@ -13,6 +13,7 @@ import {
   MatterCreateInput,
   MatterOverview,
   runMatterAgent,
+  uploadMatterDocument,
   V1AuthResult,
   V1User,
 } from './core/api';
@@ -35,13 +36,13 @@ const navigation = [
 type AppState = 'checking' | 'disabled' | 'login' | 'workspace';
 
 export function App() {
-  const [appState, setAppState]   = useState<AppState>('checking');
-  const [user, setUser]           = useState<V1User | null>(null);
+  const [appState, setAppState] = useState<AppState>('checking');
+  const [user, setUser] = useState<V1User | null>(null);
   const [matters, setMatters] = useState<Matter[]>([]);
   const [selectedMatterId, setSelectedMatterId] = useState<string | null>(null);
   const [overview, setOverview] = useState<MatterOverview | null>(null);
-  const [activeTab, setActiveTab] = useState<MatterTab>('Overview');
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('matters');
+  const [activeTab, setActiveTab] = useState<MatterTab>('Overview');
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -54,11 +55,9 @@ export function App() {
         const status = await fetchV1Status();
         if (!status.v1_enabled) { setAppState('disabled'); return; }
       } catch {
-        // If the backend is unreachable, proceed to login; it will show a
-        // clear error when the user actually tries to sign in.
+        // If backend is unreachable, proceed to login
       }
 
-      // Restore persisted session
       const token = getStoredToken();
       const stored = getStoredUser();
       if (token && stored) {
@@ -113,21 +112,6 @@ export function App() {
     return () => { cancelled = true; };
   }, [appState, openMatter]);
 
-  const handleCreateMatter = async (input: MatterCreateInput) => {
-    setIsCreating(true);
-    setWorkspaceError(null);
-    try {
-      const matter = await createMatter(input);
-      setMatters((current) => [matter, ...current]);
-      setIsCreateOpen(false);
-      await openMatter(matter.matter_id);
-    } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : 'Unable to create the matter.');
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
   const handleNavigate = useCallback((section: WorkspaceSection) => {
     setActiveSection(section);
     if (section === 'documents') {
@@ -140,6 +124,28 @@ export function App() {
     }
     setActiveTab('Overview');
   }, []);
+
+  const handleCreateMatter = async (input: MatterCreateInput, file?: File | null) => {
+    setIsCreating(true);
+    setWorkspaceError(null);
+    try {
+      const matter = await createMatter(input);
+      if (file) {
+        try {
+          await uploadMatterDocument(matter.matter_id, file);
+        } catch (uploadErr) {
+          console.warn('Could not auto-attach uploaded document to matter workspace:', uploadErr);
+        }
+      }
+      setMatters((current) => [matter, ...current]);
+      setIsCreateOpen(false);
+      await openMatter(matter.matter_id);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Unable to create the matter.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   const renderDashboardPanel = () => {
     const matter = overview?.matter_details ?? null;
@@ -432,7 +438,7 @@ export function App() {
             ))}
             {matters.map((matter) => (
               <button
-                className={`matter-nav-item ${selectedMatterId === matter.matter_id ? 'active' : ''}`}
+                className={`matter-nav-item ${selectedMatterId === matter.matter_id && activeSection === 'matters' ? 'active' : ''}`}
                 key={matter.matter_id}
                 onClick={() => void openMatter(matter.matter_id)}
                 title={matter.title}
@@ -478,10 +484,12 @@ export function App() {
               if (result.status === 'failed') throw new Error(result.error_text || 'The Case Agent failed.');
               return result.output_text || 'The command completed without output.';
             }}
+            onRefreshOverview={() => selectedMatterId && openMatter(selectedMatterId)}
           />
           <SourcePanel />
         </div>
       </div>
+
       {isCreateOpen && (
         <CreateMatterDialog
           isSaving={isCreating}

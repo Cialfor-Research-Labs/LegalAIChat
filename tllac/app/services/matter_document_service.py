@@ -23,8 +23,10 @@ _DEFAULT_UPLOAD_ROOT = _REPO_ROOT / "tllac" / "uploads"
 _ALLOWED_EXTENSIONS = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
     ".txt": "text/plain",
 }
+
 _WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
@@ -181,15 +183,37 @@ def _extract_txt_units(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _extract_doc_units(path: Path) -> list[dict[str, Any]]:
+    try:
+        content = path.read_bytes()
+        utf16_matches = [m.decode("utf-16le", errors="ignore").strip() for m in re.findall(rb'(?:[\x20-\x7E]\x00){4,}', content)]
+        ascii_matches = [m.decode("latin-1", errors="ignore").strip() for m in re.findall(rb'[\x20-\x7E\t\r\n]{4,}', content)]
+        all_pieces = [p for p in (utf16_matches + ascii_matches) if len(p) > 3 and not p.startswith("Root Entry")]
+        raw_text = "\n".join(all_pieces).strip()
+        paragraphs = _split_paragraphs(raw_text)
+        return [
+            {"page_number": None, "paragraph_number": index, "text": paragraph}
+            for index, paragraph in enumerate(paragraphs, start=1)
+        ]
+    except Exception:
+        return []
+
+
 def extract_document_units(path: Path, file_extension: str) -> list[dict[str, Any]]:
     extension = file_extension.lower()
     if extension == ".pdf":
         return _extract_pdf_units(path)
     if extension == ".docx":
-        return _extract_docx_units(path)
+        try:
+            return _extract_docx_units(path)
+        except Exception:
+            return _extract_doc_units(path)
+    if extension == ".doc":
+        return _extract_doc_units(path)
     if extension == ".txt":
         return _extract_txt_units(path)
     raise ValueError("Unsupported document type.")
+
 
 
 def build_chunk_rows(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
