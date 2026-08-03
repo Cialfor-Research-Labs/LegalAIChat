@@ -1,6 +1,10 @@
 import { BookOpenCheck, ExternalLink } from 'lucide-react';
 
-export function SourcePanel() {
+interface SourcePanelProps {
+  onOpenCanonicalSource: () => void;
+}
+
+export function SourcePanel({ onOpenCanonicalSource }: SourcePanelProps) {
   return (
     <aside className="source-panel">
       <div>
@@ -17,7 +21,9 @@ export function SourcePanel() {
         <span>Entailment</span>
         <span>Fitness</span>
       </div>
-      <button className="source-action" disabled><ExternalLink size={15} /> Open canonical source</button>
+      <button className="source-action" type="button" onClick={onOpenCanonicalSource}>
+        <ExternalLink size={15} /> Open canonical source
+      </button>
     </aside>
   );
 }

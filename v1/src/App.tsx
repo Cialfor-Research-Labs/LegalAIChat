@@ -43,6 +43,8 @@ export function App() {
   const [overview, setOverview] = useState<MatterOverview | null>(null);
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('matters');
   const [activeTab, setActiveTab] = useState<MatterTab>('Overview');
+  const [utilityPanel, setUtilityPanel] = useState<'settings' | 'search' | 'notifications' | 'context' | 'source' | null>(null);
+  const [utilityQuery, setUtilityQuery] = useState('');
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -124,6 +126,13 @@ export function App() {
     }
     setActiveTab('Overview');
   }, []);
+
+  const closeUtilityPanel = useCallback(() => {
+    setUtilityPanel(null);
+    setUtilityQuery('');
+  }, []);
+
+  const selectedMatter = overview?.matter_details ?? matters.find((matter) => matter.matter_id === selectedMatterId) ?? null;
 
   const handleCreateMatter = async (input: MatterCreateInput, file?: File | null) => {
     setIsCreating(true);
@@ -365,6 +374,201 @@ export function App() {
     );
   };
 
+  const renderUtilityPanel = () => {
+    if (!utilityPanel) {
+      return null;
+    }
+
+    const matter = selectedMatter ?? null;
+    const documentCount = overview?.documents.length ?? 0;
+    const taskCount = overview?.open_tasks.length ?? 0;
+    const filteredMatters = utilityQuery.trim()
+      ? matters.filter((item) =>
+          [item.title, item.case_number || '', item.court || '', item.jurisdiction || '']
+            .join(' ')
+            .toLowerCase()
+            .includes(utilityQuery.trim().toLowerCase()),
+        )
+      : matters;
+
+    let title = 'Workspace panel';
+    let body = (
+      <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+        This panel is available from the top bar and sidebar controls.
+      </p>
+    );
+
+    if (utilityPanel === 'settings') {
+      title = 'Settings';
+      body = (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+            Current workspace preferences and quick actions for this V1 session.
+          </p>
+          <div className="matter-list">
+            <article>
+              <div>
+                <strong>Active section</strong>
+                <span>{activeSection}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Selected matter</strong>
+                <span>{matter?.title || 'None'}</span>
+              </div>
+            </article>
+          </div>
+          <div className="dialog-actions">
+            <button type="button" onClick={() => handleNavigate('matters')}>Go to matters</button>
+            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          </div>
+        </div>
+      );
+    } else if (utilityPanel === 'search') {
+      title = 'Search';
+      body = (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+            Search the matter list in this workspace and jump straight into a record.
+          </p>
+          <label className="login-field">
+            <span style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 600 }}>Search matters</span>
+            <input
+              autoFocus
+              value={utilityQuery}
+              onChange={(event) => setUtilityQuery(event.target.value)}
+              placeholder="Search by title, case number, court, or jurisdiction"
+            />
+          </label>
+          <div className="matter-list" style={{ maxHeight: 260, overflow: 'auto' }}>
+            {filteredMatters.length ? filteredMatters.map((item) => (
+              <article key={item.matter_id}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.case_number || item.jurisdiction || 'Matter workspace'}</span>
+                </div>
+                <button type="button" className="source-action" onClick={() => { void openMatter(item.matter_id); closeUtilityPanel(); }}>
+                  Open
+                </button>
+              </article>
+            )) : (
+              <p style={{ color: 'var(--muted)', fontSize: 12 }}>No matters match your search.</p>
+            )}
+          </div>
+        </div>
+      );
+    } else if (utilityPanel === 'notifications') {
+      title = 'Notifications';
+      body = (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+            Workspace updates are shown here as quick status cards.
+          </p>
+          <div className="matter-list">
+            <article>
+              <div>
+                <strong>Selected matter</strong>
+                <span>{matter?.title || 'None selected'}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Files in scope</strong>
+                <span>{documentCount}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Open tasks</strong>
+                <span>{taskCount}</span>
+              </div>
+            </article>
+          </div>
+        </div>
+      );
+    } else if (utilityPanel === 'context') {
+      title = 'Attached context';
+      body = (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+            The Case Agent is using the current matter context, if one is selected.
+          </p>
+          <div className="matter-list">
+            <article>
+              <div>
+                <strong>Matter</strong>
+                <span>{matter?.title || 'Select a matter first'}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Linked documents</strong>
+                <span>{documentCount}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Linked tasks</strong>
+                <span>{taskCount}</span>
+              </div>
+            </article>
+          </div>
+          <div className="dialog-actions">
+            <button type="button" onClick={() => handleNavigate('matters')}>Open matter workspace</button>
+            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          </div>
+        </div>
+      );
+    } else if (utilityPanel === 'source') {
+      title = 'Canonical source';
+      body = (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>
+            This opens the current source context for the selected matter.
+          </p>
+          <div className="matter-list">
+            <article>
+              <div>
+                <strong>Selected matter</strong>
+                <span>{matter?.title || 'No matter selected'}</span>
+              </div>
+            </article>
+            <article>
+              <div>
+                <strong>Evidence items</strong>
+                <span>{(overview?.documents.length ?? 0) + (overview?.research.length ?? 0)}</span>
+              </div>
+            </article>
+          </div>
+          <div className="dialog-actions">
+            <button type="button" onClick={() => handleNavigate('documents')}>Go to documents</button>
+            <button type="button" className="primary" onClick={closeUtilityPanel}>Close</button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className="dialog-backdrop"
+        role="presentation"
+        onMouseDown={(event) => event.target === event.currentTarget && closeUtilityPanel()}
+      >
+        <div className="matter-dialog" role="dialog" aria-modal="true" aria-label={title}>
+          <div>
+            <div className="eyebrow">Workspace</div>
+            <h2>{title}</h2>
+          </div>
+          {body}
+          <div className="dialog-actions">
+            <button type="button" onClick={closeUtilityPanel}>Close</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ── Render states ─────────────────────────────────────────────────────────
   if (appState === 'checking') {
     return (
@@ -408,8 +612,8 @@ export function App() {
         </div>
         <div className="isolation-notice">{betaConfig.dataMode}</div>
         <div className="topbar-actions">
-          <button aria-label="Search" disabled><Search size={18} /></button>
-          <button aria-label="Notifications" disabled><Bell size={18} /></button>
+          <button aria-label="Search" onClick={() => setUtilityPanel('search')}><Search size={18} /></button>
+          <button aria-label="Notifications" onClick={() => setUtilityPanel('notifications')}><Bell size={18} /></button>
           <div className="profile" title={user?.full_name}>{initials}</div>
           <ChevronDown size={15} />
           <button
@@ -448,7 +652,7 @@ export function App() {
             ))}
           </nav>
           <div className="sidebar-footer">
-            <button disabled><Settings size={17} /> Settings</button>
+            <button onClick={() => setUtilityPanel('settings')}><Settings size={17} /> Settings</button>
             <div className="build-label">{betaConfig.releaseStage} build</div>
           </div>
         </aside>
@@ -478,6 +682,7 @@ export function App() {
           <CaseAgentPanel
             matter={overview?.matter_details ?? null}
             overview={overview}
+            onOpenContext={() => setUtilityPanel('context')}
             onRun={async (command) => {
               if (!selectedMatterId) throw new Error('Select a matter first.');
               const result = await runMatterAgent(selectedMatterId, command);
@@ -486,7 +691,7 @@ export function App() {
             }}
             onRefreshOverview={() => selectedMatterId && openMatter(selectedMatterId)}
           />
-          <SourcePanel />
+          <SourcePanel onOpenCanonicalSource={() => setUtilityPanel('source')} />
         </div>
       </div>
 
@@ -498,6 +703,7 @@ export function App() {
           onCreate={handleCreateMatter}
         />
       )}
+      {renderUtilityPanel()}
     </div>
   );
 }
