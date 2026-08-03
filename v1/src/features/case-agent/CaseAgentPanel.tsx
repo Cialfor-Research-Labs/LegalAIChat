@@ -7,11 +7,12 @@ const commands = ['/research', '/draft', '/brief', '/review', '/next', '/timelin
 interface CaseAgentPanelProps {
   matter: Matter | null;
   overview: MatterOverview | null;
+  onOpenContext: () => void;
   onRun: (command: string) => Promise<string>;
   onRefreshOverview?: () => void;
 }
 
-export function CaseAgentPanel({ matter, overview, onRun, onRefreshOverview }: CaseAgentPanelProps) {
+export function CaseAgentPanel({ matter, overview, onOpenContext, onRun, onRefreshOverview }: CaseAgentPanelProps) {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -75,10 +76,10 @@ export function CaseAgentPanel({ matter, overview, onRun, onRefreshOverview }: C
         <span className="skeleton-tag">Connected</span>
       </header>
 
-      <div className="context-card">
+      <button type="button" className="context-card" onClick={onOpenContext}>
         <div className="context-title"><Paperclip size={15} /> Attached context</div>
         <p>{matter ? `${matter.title}: ${contextCount} linked context items.` : 'Select a matter to attach its context.'}</p>
-      </div>
+      </button>
 
       <div className={output || error ? 'agent-result' : 'agent-empty'}>
         {!output && !error && (
