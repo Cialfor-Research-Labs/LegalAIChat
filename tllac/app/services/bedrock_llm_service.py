@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from dotenv import dotenv_values, load_dotenv
 
@@ -116,15 +117,23 @@ def _resolve_aws_credentials() -> tuple[dict[str, str], str]:
 
 def _build_bedrock_client(service_name: str = "bedrock-runtime"):
     client_kwargs, credential_source = _resolve_aws_credentials()
+    timeout_config = Config(
+        connect_timeout=int(os.getenv("BEDROCK_CONNECT_TIMEOUT", "10")),
+        read_timeout=int(os.getenv("BEDROCK_READ_TIMEOUT", "120")),
+        retries={
+            "max_attempts": int(os.getenv("BEDROCK_MAX_ATTEMPTS", "2")),
+            "mode": "standard",
+        },
+    )
 
     if credential_source == "profile":
         session = boto3.session.Session(
             profile_name=client_kwargs["profile_name"],
             region_name=client_kwargs.get("region_name"),
         )
-        return session.client(service_name), credential_source
+        return session.client(service_name, config=timeout_config), credential_source
 
-    return boto3.client(service_name, **client_kwargs), credential_source
+    return boto3.client(service_name, config=timeout_config, **client_kwargs), credential_source
 
 
 def _build_messages(
@@ -182,13 +191,49 @@ def _extract_text(response_body: dict) -> str:
         choice = response_body["choices"][0]
 
         if "message" in choice and "content" in choice["message"]:
-            return str(choice["message"]["content"]).strip()
+            content = choice["message"]["content"]
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("text"):
+                            parts.append(str(item["text"]))
+                        elif item.get("content"):
+                            parts.append(str(item["content"]))
+                    elif item:
+                        parts.append(str(item))
+                if parts:
+                    return "\n".join(part.strip() for part in parts if part).strip()
+            return str(content).strip()
 
         if "text" in choice:
             return str(choice["text"]).strip()
 
+        if "content" in choice:
+            content = choice["content"]
+            if isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("text"):
+                            parts.append(str(item["text"]))
+                        elif item.get("content"):
+                            parts.append(str(item["content"]))
+                    elif item:
+                        parts.append(str(item))
+                if parts:
+                    return "\n".join(part.strip() for part in parts if part).strip()
+            if content:
+                return str(content).strip()
+
     if "outputs" in response_body and response_body["outputs"]:
-        return str(response_body["outputs"][0].get("text", "")).strip()
+        first_output = response_body["outputs"][0]
+        if isinstance(first_output, dict):
+            if first_output.get("text"):
+                return str(first_output["text"]).strip()
+            if first_output.get("content"):
+                return str(first_output["content"]).strip()
+        return str(first_output).strip()
 
     if "generation" in response_body:
         return str(response_body["generation"]).strip()
@@ -198,6 +243,23 @@ def _extract_text(response_body: dict) -> str:
 
     if "completion" in response_body:
         return str(response_body["completion"]).strip()
+
+    if "content" in response_body:
+        content = response_body["content"]
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("text"):
+                        parts.append(str(item["text"]))
+                    elif item.get("content"):
+                        parts.append(str(item["content"]))
+                elif item:
+                    parts.append(str(item))
+            if parts:
+                return "\n".join(part.strip() for part in parts if part).strip()
+        if content:
+            return str(content).strip()
 
     return ""
 
