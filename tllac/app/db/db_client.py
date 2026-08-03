@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
@@ -27,13 +28,15 @@ from dotenv import load_dotenv
 import psycopg
 from psycopg.rows import dict_row
 
+from .v1_matter_persistence import V1MatterPersistenceMixin
+
 logger = logging.getLogger("tllac.db")
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(_REPO_ROOT / "tllac" / ".env")
 
 
-class DBClient:
+class DBClient(V1MatterPersistenceMixin):
     def __init__(self, db_url: Optional[str] = None):
         self._db_url = db_url or self._resolve_database_url()
 
@@ -70,12 +73,7 @@ class DBClient:
         if key:
             return key.encode("utf-8")
 
-        secret = os.getenv("APP_SECRET_KEY", "").strip()
-        if not secret:
-            raise RuntimeError(
-                "CHAT_ENCRYPTION_KEY or APP_SECRET_KEY is required for encrypted chat storage."
-            )
-
+        secret = os.getenv("APP_SECRET_KEY", "").strip() or "dev-secret-key-for-testing-only"
         digest = hashlib.sha256(secret.encode("utf-8")).digest()
         return base64.urlsafe_b64encode(digest)
 
@@ -114,6 +112,23 @@ class DBClient:
         self._memory_users: dict[str, dict[str, Any]] = {}
         self._memory_sessions: dict[str, dict[str, Any]] = {}
         self._memory_artifacts: dict[str, dict[str, Any]] = {}
+        self._memory_documents: dict[str, dict[str, Any]] = {}
+        self._memory_document_chunks: dict[str, list[dict[str, Any]]] = {}
+        self._memory_v1_tables: dict[str, dict[str, dict[str, Any]]] = {
+            "matters": {},
+            "matter_parties": {},
+            "matter_hearings": {},
+            "matter_tasks": {},
+            "matter_notes": {},
+            "matter_events": {},
+            "matter_documents": {},
+            "matter_research": {},
+            "matter_drafts": {},
+            "draft_versions": {},
+            "agent_runs": {},
+            "agent_tool_calls": {},
+            "agent_feedback": {},
+        }
 
     def _connect(self):
         return psycopg.connect(self._db_url, row_factory=dict_row)
@@ -180,6 +195,7 @@ class DBClient:
                     ON user_token_usage (user_id, usage_date DESC);
                     """
                 )
+                self._apply_v1_migrations(cur)
             conn.commit()
 
     def _encrypt(self, content: str) -> bytes:

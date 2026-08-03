@@ -3,7 +3,7 @@ import { PanelLeft } from 'lucide-react';
 import { ChatContainer } from './components/ChatContainer';
 import { Message } from './components/ChatMessage';
 import { Sidebar } from './components/Sidebar';
-import { requestWithFallback } from './api';
+import { ApiResponseError, requestBlobWithFallback, requestWithFallback } from './api';
 
 interface ChatPageProps {
   embedded?: boolean;
@@ -42,6 +42,22 @@ interface ChatSessionSummary {
   updated_at: string;
 }
 
+interface MatterSummary {
+  matter_id: string;
+  title: string;
+  description: string;
+  case_number: string | null;
+  court: string | null;
+  jurisdiction: string | null;
+  stage: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  is_archived?: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface ChatSessionDetail extends ChatSessionSummary {
   messages: {
     id: string;
@@ -58,48 +74,63 @@ interface ChatResponsePayload {
   notice_prefill: string | null;
 }
 
+interface MatterDocument {
+  document_id: string;
+  original_filename: string;
+  status: string;
+  upload_timestamp: string;
+  chunk_count: number;
+}
+
+interface MatterSearchResult {
+  chunk_text: string;
+  document_id: string;
+  document_name: string;
+  page_number: number | null;
+  paragraph_number: number | null;
+  chunk_position: number;
+}
+
 async function requestChatResponse(
   authToken: string,
   query: string,
   sessionId?: string | null,
   personalization?: ChatPageProps['personalization'],
+  matterId?: string | null,
 ): Promise<{
   responseText: string;
   sessionId: string | null;
   recommendLegalNotice: boolean;
   noticePrefill: string | null;
 }> {
-  const url = '/chat';
   const init = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ query, session_id: sessionId || null, personalization }),
+    body: JSON.stringify({
+      query,
+      session_id: sessionId || null,
+      matter_id: matterId || null,
+      personalization,
+    }),
   };
 
-  // Use fetch directly so we can inspect the status code for 429.
-  let rawResponse: Response | null = null;
+  let data: ChatResponsePayload;
   try {
-    rawResponse = await fetch(url, init);
-  } catch {
-    // network error — fall through to requestWithFallback below
+    data = await requestWithFallback<ChatResponsePayload>('/chat', () => init);
+  } catch (error) {
+    if (error instanceof ApiResponseError && error.status === 429) {
+      const detail = error.detail as { cooldown_remaining_seconds?: number } | null;
+      const cooldownSeconds = detail?.cooldown_remaining_seconds ?? 0;
+      const hours = Math.max(1, Math.ceil(cooldownSeconds / 3600));
+      throw new Error(
+        `Daily token limit reached. Chat will be available again in approximately ${hours} hour${hours !== 1 ? 's' : ''}. The countdown is shown in the header.`,
+      );
+    }
+    throw error;
   }
-
-  if (rawResponse && rawResponse.status === 429) {
-    let cooldownSeconds = 0;
-    try {
-      const body = await rawResponse.json();
-      cooldownSeconds = body?.detail?.cooldown_remaining_seconds ?? 0;
-    } catch { /* ignore */ }
-    const hours = Math.ceil(cooldownSeconds / 3600);
-    throw new Error(
-      `Daily token limit reached. Chat will be available again in approximately ${hours} hour${hours !== 1 ? 's' : ''}. The countdown is shown in the header.`,
-    );
-  }
-
-  const data = await requestWithFallback<ChatResponsePayload>('/chat', () => init);
 
   const responseText = typeof data?.response === 'string' ? data.response.trim() : '';
   if (!responseText) {
@@ -129,9 +160,23 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
+  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatSessionSummary[]>([]);
+  const [matterList, setMatterList] = useState<MatterSummary[]>([]);
+  const [isMatterListLoading, setIsMatterListLoading] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [matterId, setMatterId] = useState('');
+  const [selectedMatterId, setSelectedMatterId] = useState('');
+  const [selectedMatterFile, setSelectedMatterFile] = useState<File | null>(null);
+  const [matterDocuments, setMatterDocuments] = useState<MatterDocument[]>([]);
+  const [matterSearchQuery, setMatterSearchQuery] = useState('');
+  const [matterSearchResults, setMatterSearchResults] = useState<MatterSearchResult[]>([]);
+  const [matterError, setMatterError] = useState<string | null>(null);
+  const [isMatterLoading, setIsMatterLoading] = useState(false);
+  const [isMatterUploading, setIsMatterUploading] = useState(false);
+  const [isMatterSearching, setIsMatterSearching] = useState(false);
+  const [matterCatalogError, setMatterCatalogError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return true;
@@ -140,6 +185,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   });
 
   const loadSessions = async () => {
+    setIsSessionsLoading(true);
     try {
       const data = await requestWithFallback<{ sessions: ChatSessionSummary[] }>('/chat/sessions', () => ({
         method: 'GET',
@@ -154,6 +200,29 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Unable to load chat history.');
       return [];
+    } finally {
+      setIsSessionsLoading(false);
+    }
+  };
+
+  const loadMatters = async () => {
+    setIsMatterListLoading(true);
+    try {
+      const data = await requestWithFallback<{ matters: MatterSummary[] }>('/v1/matters?archive_state=active', () => ({
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }));
+      const matters = Array.isArray(data.matters) ? data.matters : [];
+      setMatterList(matters);
+      setMatterCatalogError(null);
+      return matters;
+    } catch (error) {
+      setMatterCatalogError(error instanceof Error ? error.message : 'Unable to load matters.');
+      return [];
+    } finally {
+      setIsMatterListLoading(false);
     }
   };
 
@@ -183,24 +252,29 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    void loadSessions().then(async (sessions) => {
+    void (async () => {
+      const sessionsPromise = loadSessions();
+      void loadMatters();
+      const loadedSessions = await sessionsPromise;
       if (cancelled) {
         return;
       }
-      if (sessions.length > 0) {
+
+      if (loadedSessions.length > 0) {
         try {
-          await loadSessionMessages(sessions[0].session_id);
+          await loadSessionMessages(loadedSessions[0].session_id);
         } catch (error) {
           if (!cancelled) {
             setHistoryError(error instanceof Error ? error.message : 'Unable to open chat session.');
           }
         }
-      } else {
-        setMessages([]);
-        setActiveSessionId(null);
-        setIsSessionLoading(false);
+        return;
       }
-    });
+
+      setMessages([]);
+      setActiveSessionId(null);
+      setIsSessionLoading(false);
+    })();
 
     return () => {
       cancelled = true;
@@ -224,7 +298,13 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     let noticePrefill: string | null = null;
 
     try {
-      const result = await requestChatResponse(authToken, content, activeSessionId, personalization);
+      const result = await requestChatResponse(
+        authToken,
+        content,
+        activeSessionId,
+        personalization,
+        selectedMatterId,
+      );
       responseText = result.responseText;
       returnedSessionId = result.sessionId;
       recommendLegalNotice = result.recommendLegalNotice;
@@ -258,6 +338,27 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     setActiveSessionId(null);
   };
 
+  const handleRefreshSessions = () => {
+    void loadSessions();
+  };
+
+  const handleRefreshMatters = () => {
+    void loadMatters();
+  };
+
+  const handleSelectMatter = (matterIdToLoad: string) => {
+    const normalizedMatterId = matterIdToLoad.trim();
+    if (!normalizedMatterId) {
+      setMatterError('Select a matter first.');
+      return;
+    }
+    setMatterId(normalizedMatterId);
+    setSelectedMatterId(normalizedMatterId);
+    setMatterSearchResults([]);
+    setMatterError(null);
+    void loadMatterDocuments(normalizedMatterId);
+  };
+
   const handleSelectSession = async (sessionId: string) => {
     try {
       await loadSessionMessages(sessionId);
@@ -267,6 +368,130 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Unable to open chat session.');
       setIsSessionLoading(false);
+    }
+  };
+
+  const loadMatterDocuments = async (targetMatterId: string) => {
+    setIsMatterLoading(true);
+    try {
+      const documents = await requestWithFallback<MatterDocument[]>(
+        `/matter-documents?matter_id=${encodeURIComponent(targetMatterId)}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterDocuments(documents);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to load matter documents.');
+    } finally {
+      setIsMatterLoading(false);
+    }
+  };
+
+  const handleLoadMatter = () => {
+    const normalizedMatterId = matterId.trim();
+    if (!normalizedMatterId) {
+      setMatterError('Enter a matter ID.');
+      return;
+    }
+    setSelectedMatterId(normalizedMatterId);
+    setMatterSearchResults([]);
+    void loadMatterDocuments(normalizedMatterId);
+  };
+
+  const handleUploadMatterDocument = async () => {
+    if (!selectedMatterId || !selectedMatterFile) {
+      setMatterError('Select a matter and a document to upload.');
+      return;
+    }
+    setIsMatterUploading(true);
+    try {
+      const body = new FormData();
+      body.append('matter_id', selectedMatterId);
+      body.append('file', selectedMatterFile);
+      await requestWithFallback<MatterDocument>('/matter-documents/upload', () => ({
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+        body,
+      }));
+      setSelectedMatterFile(null);
+      setMatterError(null);
+      await loadMatterDocuments(selectedMatterId);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to upload the document.');
+    } finally {
+      setIsMatterUploading(false);
+    }
+  };
+
+  const handleSearchMatterDocuments = async () => {
+    const normalizedQuery = matterSearchQuery.trim();
+    if (!selectedMatterId || normalizedQuery.length < 2) {
+      setMatterError('Enter at least two characters to search the selected matter.');
+      return;
+    }
+    setIsMatterSearching(true);
+    try {
+      const result = await requestWithFallback<{ items: MatterSearchResult[] }>(
+        `/matter-documents/search?matter_id=${encodeURIComponent(selectedMatterId)}&query=${encodeURIComponent(normalizedQuery)}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterSearchResults(result.items);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : 'Unable to search matter documents.');
+    } finally {
+      setIsMatterSearching(false);
+    }
+  };
+
+  const handleDocumentStatusChange = async (documentId: string, action: 'archive' | 'delete') => {
+    try {
+      await requestWithFallback<MatterDocument>(
+        action === 'archive'
+          ? `/matter-documents/${documentId}/archive`
+          : `/matter-documents/${documentId}`,
+        () => ({
+          method: action === 'archive' ? 'POST' : 'DELETE',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      setMatterSearchResults((current) =>
+        current.filter((result) => result.document_id !== documentId),
+      );
+      await loadMatterDocuments(selectedMatterId);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : `Unable to ${action} the document.`);
+    }
+  };
+
+  const handleDocumentFile = async (documentId: string, disposition: 'view' | 'download') => {
+    try {
+      const result = await requestBlobWithFallback(
+        `/matter-documents/${documentId}/${disposition}`,
+        () => ({
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authToken}` },
+        }),
+      );
+      const objectUrl = URL.createObjectURL(result.blob);
+      if (disposition === 'view') {
+        window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = result.filename || 'matter-document';
+        link.click();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      setMatterError(null);
+    } catch (error) {
+      setMatterError(error instanceof Error ? error.message : `Unable to ${disposition} the document.`);
     }
   };
 
@@ -306,13 +531,41 @@ export const ChatPage: React.FC<ChatPageProps> = ({
       <Sidebar
         onNewChat={handleNewChat}
         onSelectChat={handleSelectSession}
+        onRefreshSessions={handleRefreshSessions}
+        onRefreshMatters={handleRefreshMatters}
         onLogout={onLogout}
         onClose={() => setIsSidebarOpen(false)}
         userName={user.full_name}
         chatHistory={chatHistory}
         activeSessionId={activeSessionId}
         error={historyError}
+        isSessionsLoading={isSessionsLoading}
         isOpen={isSidebarOpen}
+        matters={matterList}
+        isMatterListLoading={isMatterListLoading}
+        matterCatalogError={matterCatalogError}
+        matterId={matterId}
+        selectedMatterId={selectedMatterId}
+        onMatterIdChange={setMatterId}
+        onSelectMatter={handleSelectMatter}
+        onLoadMatter={handleLoadMatter}
+        onMatterFileChange={setSelectedMatterFile}
+        onUploadMatterDocument={() => void handleUploadMatterDocument()}
+        onMatterSearchChange={setMatterSearchQuery}
+        onSearchMatterDocuments={() => void handleSearchMatterDocuments()}
+        onRefreshMatterDocuments={() => void loadMatterDocuments(selectedMatterId)}
+        onViewDocument={(documentId) => void handleDocumentFile(documentId, 'view')}
+        onDownloadDocument={(documentId) => void handleDocumentFile(documentId, 'download')}
+        onArchiveDocument={(documentId) => void handleDocumentStatusChange(documentId, 'archive')}
+        onDeleteDocument={(documentId) => void handleDocumentStatusChange(documentId, 'delete')}
+        selectedMatterFileName={selectedMatterFile?.name ?? null}
+        isMatterLoading={isMatterLoading}
+        isMatterUploading={isMatterUploading}
+        isMatterSearching={isMatterSearching}
+        matterError={matterError}
+        matterDocuments={matterDocuments}
+        matterSearchResults={matterSearchResults}
+        matterSearchQuery={matterSearchQuery}
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{content}</div>
     </div>

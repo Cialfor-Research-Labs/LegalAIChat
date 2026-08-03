@@ -22,6 +22,7 @@ LEGAL_RAG_MIN_RESPONSE_CONFIDENCE=0.42
 LEGAL_RAG_ALLOW_ONLINE_CONTEXT=false
 LEGAL_RAG_CORPUS_ROOT=..
 LEGAL_RAG_INDEX_PATH=app/data/legal_corpus.sqlite3
+MATTER_DOCUMENT_UPLOAD_ROOT=uploads
 ONLINE_LEGAL_RESEARCH_ENABLED=false
 ```
 
@@ -42,6 +43,17 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 - `GET /chat/sessions` lists the user's saved sessions.
 - `GET /chat/sessions/{session_id}` returns one decrypted session.
 
+## Matter Document APIs
+
+- `POST /matter-documents/upload` uploads a PDF, DOCX, or TXT file for an authenticated user and matter.
+- `GET /matter-documents?matter_id=...` lists documents for a matter.
+- `GET /matter-documents/{document_id}` returns document metadata.
+- `GET /matter-documents/{document_id}/download` downloads the stored file.
+- `GET /matter-documents/{document_id}/view` streams the stored file inline.
+- `DELETE /matter-documents/{document_id}` marks a document deleted and removes the local file.
+- `POST /matter-documents/{document_id}/archive` marks a document archived.
+- `GET /matter-documents/search?matter_id=...&query=...` searches matter documents.
+
 Example chat request:
 
 ```json
@@ -56,6 +68,8 @@ Example chat request:
 - Users, chat sessions, and encrypted messages are stored in Postgres.
 - Chat message bodies are encrypted before persistence.
 - Session titles update from the first user prompt and are shown in the sidebar.
+- Matter document metadata and extracted chunks are stored in Postgres.
+- Uploaded files are saved locally under `tllac/uploads/user_<id>/matter_<id>/`.
 
 ## Frontend Notes
 

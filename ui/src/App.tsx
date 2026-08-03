@@ -116,6 +116,17 @@ const AUTH_TOKEN_STORAGE_KEY = 'tllac_auth_token';
 const USER_SETTINGS_STORAGE_KEY = 'tllac_user_settings';
 const DOCUMENT_GENERATOR_PATH = '/document-generator/generate';
 
+function getV1BetaUrl(): string {
+  const configuredUrl = import.meta.env.VITE_V1_BETA_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  const hostname = window.location.hostname || '127.0.0.1';
+  return `${protocol}//${hostname}:3001`;
+}
+
 const defaultUserSettings: UserSettings = {
   theme: 'dark',
   contrast: 'system',
@@ -703,10 +714,32 @@ export const App: React.FC = () => {
             >
               Document Generator
             </button>
+            <button
+              type="button"
+              onClick={() => window.open(getV1BetaUrl(), '_blank', 'noopener,noreferrer')}
+              className="ml-2 inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold uppercase tracking-[0.14em] text-primary transition hover:border-primary/50 hover:bg-primary/15"
+              aria-label="Open V1 Beta in a new tab"
+              title="Open the isolated V1 Beta workspace"
+            >
+              v1
+            </button>
           </div>
 
-          {/* Right section: Profile / Avatar Settings Dropdown */}
-          <div className="relative flex items-center justify-end shrink-0" ref={profileMenuRef}>
+          {/* Right section: Theme toggle + Profile / Avatar Settings Dropdown */}
+          <div className="relative flex items-center justify-end gap-2 shrink-0" ref={profileMenuRef}>
+            {/* Quick theme toggle: cycles dark → light → system */}
+            <button
+              type="button"
+              aria-label={`Switch theme (current: ${userSettings.theme})`}
+              onClick={() => {
+                const next: UserSettings['theme'] = userSettings.theme === 'dark' ? 'light' : userSettings.theme === 'light' ? 'system' : 'dark';
+                updateUserSettings('theme', next);
+              }}
+              title={`Theme: ${userSettings.theme} — click to switch`}
+              className="flex h-8 w-8 items-center justify-center rounded-xl border border-outline-variant/40 bg-surface-container-low text-on-surface-variant transition hover:border-primary/40 hover:bg-surface-container hover:text-primary active:scale-95"
+            >
+              {resolvedTheme === 'dark' ? <Moon size={15} /> : <Sun size={15} />}
+            </button>
             <button
               type="button"
               aria-label="User profile and settings"
@@ -920,8 +953,9 @@ export const App: React.FC = () => {
       {/* Settings & Profile Modals */}
       {activeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className={`relative w-full rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-2xl text-on-surface space-y-4 ${activeModal === 'settings' ? 'max-w-4xl' : 'max-w-md'}`}>
-            <div className="flex items-center justify-between border-b border-outline-variant/20 pb-3">
+          <div className={`relative flex w-full flex-col rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl text-on-surface ${activeModal === 'settings' ? 'max-w-4xl min-h-[480px] max-h-[min(88vh,680px)]' : 'max-w-md min-h-[280px] max-h-[min(80vh,520px)]'}`}>
+            {/* Modal header — always visible */}
+            <div className="flex shrink-0 items-center justify-between border-b border-outline-variant/20 px-6 py-4">
               <div className="flex items-center gap-2 font-semibold text-lg">
                 {activeModal === 'profile' && <User className="text-primary" size={20} />}
                 {activeModal === 'settings' && <Settings className="text-primary" size={20} />}
@@ -938,6 +972,8 @@ export const App: React.FC = () => {
                 <X size={18} />
               </button>
             </div>
+            {/* Modal scrollable body */}
+            <div className="min-h-0 flex-1 overflow-y-auto p-6 space-y-4">
 
             {activeModal === 'profile' && (
               <div className="space-y-3 text-sm">
@@ -968,9 +1004,9 @@ export const App: React.FC = () => {
             )}
 
             {activeModal === 'settings' && (
-              <div className="grid min-h-[390px] gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
-                <nav className="flex max-h-[56vh] gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
-                  {[
+              <div className="grid gap-6 text-sm md:grid-cols-[190px_minmax(0,1fr)]">
+                <nav className="flex gap-1 overflow-x-auto border-b border-outline-variant/20 pb-3 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r md:pb-0 md:pr-4" aria-label="Settings sections">
+                  {([
                     ['general', 'General', Settings],
                     ['notifications', 'Notifications', Bell],
                     ['personalization', 'Personalization', Sliders],
@@ -985,17 +1021,16 @@ export const App: React.FC = () => {
                     ['trusted-contact', 'Trusted contact', User],
                     ['account', 'Account', User],
                     ['keyboard', 'Keyboard', Laptop],
-                  ].map(([id, label, Icon]) => {
+                  ] as Array<[SettingsSection, string, React.ComponentType<{ size?: number }>]>).map(([id, label, Icon]) => {
                     const isActive = activeSettingsSection === id;
-                    const SectionIcon = Icon as typeof Settings;
                     return (
                       <button
                         key={id}
                         type="button"
-                        onClick={() => setActiveSettingsSection(id as SettingsSection)}
+                        onClick={() => setActiveSettingsSection(id)}
                         className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${isActive ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface'}`}
                       >
-                        <SectionIcon size={16} />
+                        <Icon size={16} />
                         {label}
                       </button>
                     );
@@ -1059,20 +1094,57 @@ export const App: React.FC = () => {
 
                   {activeSettingsSection === 'notifications' && (
                     <>
-                      <div><h2 className="text-base font-semibold">Notifications</h2><p className="mt-1 text-xs text-on-surface-variant">Choose how each type of workspace update reaches you.</p></div>
+                      <div>
+                        <h2 className="text-base font-semibold">Notifications</h2>
+                        <p className="mt-1 text-xs text-on-surface-variant">Choose how each type of workspace update reaches you.</p>
+                      </div>
                       <div className="divide-y divide-outline-variant/20 overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-low">
-                        {[
-                          ['codex', 'Codex', 'Activity and updates from your AI workspace.', ['push']],
-                          ['groupChat', 'Group chat', 'New messages and mentions in group conversations.', ['push']],
-                          ['marketing', 'Marketing', 'Product announcements and occasional offers.', ['push', 'email']],
-                          ['personalizedTips', 'Personalized tips', 'Helpful suggestions tailored to your workflow.', ['push', 'email']],
-                          ['projects', 'Projects', 'Project activity and collaboration updates.', ['email']],
-                          ['responses', 'Responses', 'When an assistant response or generation is ready.', ['push']],
-                          ['tasks', 'Tasks', 'Task assignments, reminders, and completions.', ['push', 'email']],
-                          ['usage', 'Usage', 'Token and workspace usage updates.', ['push', 'email']],
-                        ] as [NotificationCategory, string, string, (keyof NotificationPreference)[]][]).map(([category, title, description, channels]) => {
-                          return <div key={category} className="flex items-center gap-3 p-4"><Bell size={17} className="shrink-0 text-primary" /><div className="min-w-0 flex-1"><div className="font-medium">{title}</div><div className="mt-0.5 text-xs text-on-surface-variant">{description}</div></div><div className="flex shrink-0 items-center gap-3">{channels.map((channel) => { const enabled = Boolean(userSettings.notifications[category][channel]); return <label key={channel} className="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-variant"><span className="hidden sm:inline">{channel === 'push' ? 'Push' : 'Email'}</span><button type="button" aria-label={`${title} ${channel} notifications`} role="switch" aria-checked={enabled} onClick={() => updateNotificationPreference(category, channel, !enabled)} className={`relative h-5 w-9 rounded-full transition ${enabled ? 'bg-primary' : 'bg-outline-variant'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled ? 'left-4' : 'left-0.5'}`} /></button></label>; })}</div></div>;
-                        })}
+                        {(() => {
+                          const categories: Array<[NotificationCategory, string, string, Array<keyof NotificationPreference>]> = [
+                            ['codex', 'Codex', 'Activity and updates from your AI workspace.', ['push']],
+                            ['groupChat', 'Group chat', 'New messages and mentions in group conversations.', ['push']],
+                            ['marketing', 'Marketing', 'Product announcements and occasional offers.', ['push', 'email']],
+                            ['personalizedTips', 'Personalized tips', 'Helpful suggestions tailored to your workflow.', ['push', 'email']],
+                            ['projects', 'Projects', 'Project activity and collaboration updates.', ['email']],
+                            ['responses', 'Responses', 'When an assistant response or generation is ready.', ['push']],
+                            ['tasks', 'Tasks', 'Task assignments, reminders, and completions.', ['push', 'email']],
+                            ['usage', 'Usage', 'Token and workspace usage updates.', ['push', 'email']],
+                          ];
+                          return categories.map(([category, title, description, channels]) => {
+                            const enabled = (channel: keyof NotificationPreference) =>
+                              Boolean(userSettings.notifications[category][channel]);
+                            return (
+                              <div key={category} className="flex items-center gap-3 p-4">
+                                <Bell size={17} className="shrink-0 text-primary" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-medium">{title}</div>
+                                  <div className="mt-0.5 text-xs text-on-surface-variant">{description}</div>
+                                </div>
+                                <div className="flex shrink-0 items-center gap-3">
+                                  {channels.map((channel) => (
+                                    <label key={channel} className="flex items-center gap-1.5 text-[11px] font-medium text-on-surface-variant">
+                                      <span className="hidden sm:inline">
+                                        {channel === 'push' ? 'Push' : 'Email'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        aria-label={`${title} ${channel} notifications`}
+                                        role="switch"
+                                        aria-checked={enabled(channel)}
+                                        onClick={() => updateNotificationPreference(category, channel, !enabled(channel))}
+                                        className={`relative h-5 w-9 rounded-full transition ${enabled(channel) ? 'bg-primary' : 'bg-outline-variant'}`}
+                                      >
+                                        <span
+                                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${enabled(channel) ? 'left-4' : 'left-0.5'}`}
+                                        />
+                                      </button>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </>
                   )}
@@ -1168,15 +1240,16 @@ export const App: React.FC = () => {
               </div>
             )}
 
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => setActiveModal(null)}
-                className="neutral-button w-full justify-center text-xs"
-              >
-                Close
-              </button>
-            </div>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="neutral-button w-full justify-center text-xs"
+                >
+                  Close
+                </button>
+              </div>
+            </div>{/* end scrollable body */}
           </div>
         </div>
       )}
