@@ -22,7 +22,7 @@ function getApiBase(): string {
 
 export const betaConfig = {
   label: 'V1.0 Beta',
-  releaseStage: 'Alpha',
-  dataMode: 'Isolated beta workspace — no production data connected',
+  releaseStage: 'Beta',
+  dataMode: 'Secure matter workspace — connected to V1 backend',
   apiBase: getApiBase(),
 } as const;
