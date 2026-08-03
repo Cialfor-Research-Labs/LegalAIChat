@@ -956,6 +956,60 @@ def build_legal_rag_source_note(query: str) -> str:
     return build_legal_rag_source_note_from_result(retrieve_legal_rag_result(query))
 
 
+# ── Display-layer sanitisation helpers ───────────────────────────────────────
+# These helpers prevent internal implementation details (chunk IDs, raw HTML
+# scraped from judgment portals) from reaching the user-facing chat response.
+
+_CHUNK_ID_PATTERN = re.compile(r"\bChunk\s+[a-f0-9]{8,}[^\s,]*", re.I)
+_CHUNK_PAREN_PATTERN = re.compile(r"\s*\([a-f0-9]{8,}[^\)]*\)", re.I)
+# Scraped judgment pages begin with navigation boilerplate; detect them by the
+# presence of common navigation phrases.
+_HTML_SCRAPE_MARKERS = (
+    "main navigation",
+    "free features",
+    "premium",
+    "login",
+    "legal document view",
+    "tools for analyzing",
+    "unlock adva",
+)
+
+
+def _clean_reference_for_display(reference: str) -> str:
+    """Strip raw chunk identifiers from a reference string.
+
+    Corpus hits with no matched section fall back to ``Chunk <hash>_cN``.
+    If that is the entire reference it is meaningless to users and should be
+    suppressed entirely.  If it appears as a parenthetical annotation inside a
+    human-readable reference (e.g. ``Section 42 (abc123_c7)``), strip just the
+    parenthetical.
+    """
+    if not reference:
+        return reference
+    # Full chunk-only reference → drop entirely
+    if _CHUNK_ID_PATTERN.fullmatch(reference.strip()):
+        return ""
+    # Parenthetical chunk annotation embedded in a readable reference → strip it
+    cleaned = _CHUNK_PAREN_PATTERN.sub("", reference).strip().rstrip(",;")
+    return cleaned
+
+
+def _clean_summary_for_display(summary: str) -> str:
+    """Strip raw HTML / navigation boilerplate from a corpus chunk summary.
+
+    Some judgment chunks begin with scraped navigation text such as
+    "Main Navigation Free features Premium Prism AI IKademy Pricing Login…".
+    We detect these by their characteristic phrases and return an empty string
+    so the caller can fall back to the statute title alone.
+    """
+    if not summary:
+        return summary
+    lower_head = summary[:200].lower()
+    if any(marker in lower_head for marker in _HTML_SCRAPE_MARKERS):
+        return ""
+    return summary
+
+
 def build_legal_rag_source_note_from_result(result: LegalRagResult) -> str:
     if not result.statute_matches and not result.case_matches:
         return ""
@@ -963,10 +1017,13 @@ def build_legal_rag_source_note_from_result(result: LegalRagResult) -> str:
     lines = ["Source Check:"]
 
     for item in result.statute_matches:
-        lines.append(f"- {item.title} - {item.reference} -> {item.source_file}")
+        # Strip internal chunk IDs from the reference shown to the user.
+        ref = _clean_reference_for_display(item.reference)
+        lines.append(f"- {item.title} - {ref}")
 
     for item in result.case_matches:
-        lines.append(f"- {item.title} - {item.reference} -> {item.source_file}")
+        ref = _clean_reference_for_display(item.reference)
+        lines.append(f"- {item.title} - {ref}")
 
     return "\n".join(lines)
 
@@ -982,10 +1039,16 @@ def build_relevant_laws_note_from_result(result: LegalRagResult) -> str:
         key=lambda item: (act_order.get(item.act_key, 9), -item.score, item.reference),
     )
     for item in ordered_matches:
-        short_summary = _truncate_text(item.summary, 160)
-        lines.append(f"- {item.title} - {item.reference}: {short_summary}")
+        ref = _clean_reference_for_display(item.reference)
+        # Skip items whose only reference is a raw internal chunk identifier.
+        if not ref:
+            continue
+        clean_summary = _clean_summary_for_display(item.summary)
+        short_summary = _truncate_text(clean_summary, 160)
+        lines.append(f"- {item.title} - {ref}: {short_summary}")
 
-    return "\n".join(lines)
+    # If every item was a raw chunk, return nothing rather than an empty header.
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def build_relevant_sections_note_from_result(result: LegalRagResult) -> str:
