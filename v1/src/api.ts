@@ -1,4 +1,6 @@
-const API_BASE = import.meta.env.VITE_V1_API_BASE || 'http://localhost:9001/v1';
+import { betaConfig } from './core/betaConfig';
+
+const API_BASE = `${betaConfig.apiBase}/v1`;
 const ACCESS_KEY = 'legalai_v1_access';
 
 export class V1Api {
