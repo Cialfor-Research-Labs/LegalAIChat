@@ -24,7 +24,10 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def advanced_commands_enabled() -> bool:
-    return _env_flag("ADVANCED_AGENT_COMMANDS_ENABLED", False)
+    # Case Agent commands are expected to work by default in the V1 workspace.
+    # An explicit "false" environment flag can still disable them for deployments
+    # that need to keep the advanced workflows gated.
+    return _env_flag("ADVANCED_AGENT_COMMANDS_ENABLED", True)
 
 
 def command_enabled(command: str) -> bool:

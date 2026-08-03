@@ -59,6 +59,18 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(payload["command"], "/next")
         self.assertIn("Next Action Items", payload["output_text"])
 
+    def test_brief_command_is_available_by_default(self) -> None:
+        response = self._request(
+            "POST",
+            f"/v1/matters/{self.matter['matter_id']}/agent/run",
+            json={"command_text": "/brief give details about this case", "conversation_history": []},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["command"], "/brief")
+        self.assertIn("Matter:", payload["output_text"])
+
     def test_missing_matter_returns_404(self) -> None:
         response = self._request(
             "POST",
