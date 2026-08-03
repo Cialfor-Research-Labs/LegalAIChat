@@ -42,6 +42,22 @@ interface ChatSessionSummary {
   updated_at: string;
 }
 
+interface MatterSummary {
+  matter_id: string;
+  title: string;
+  description: string;
+  case_number: string | null;
+  court: string | null;
+  jurisdiction: string | null;
+  stage: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  is_archived?: boolean;
+  archived_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 interface ChatSessionDetail extends ChatSessionSummary {
   messages: {
     id: string;
@@ -144,7 +160,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSessionLoading, setIsSessionLoading] = useState(false);
+  const [isSessionsLoading, setIsSessionsLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatSessionSummary[]>([]);
+  const [matterList, setMatterList] = useState<MatterSummary[]>([]);
+  const [isMatterListLoading, setIsMatterListLoading] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [matterId, setMatterId] = useState('');
@@ -157,6 +176,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [isMatterLoading, setIsMatterLoading] = useState(false);
   const [isMatterUploading, setIsMatterUploading] = useState(false);
   const [isMatterSearching, setIsMatterSearching] = useState(false);
+  const [matterCatalogError, setMatterCatalogError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
       return true;
@@ -165,6 +185,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   });
 
   const loadSessions = async () => {
+    setIsSessionsLoading(true);
     try {
       const data = await requestWithFallback<{ sessions: ChatSessionSummary[] }>('/chat/sessions', () => ({
         method: 'GET',
@@ -179,6 +200,29 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : 'Unable to load chat history.');
       return [];
+    } finally {
+      setIsSessionsLoading(false);
+    }
+  };
+
+  const loadMatters = async () => {
+    setIsMatterListLoading(true);
+    try {
+      const data = await requestWithFallback<{ matters: MatterSummary[] }>('/v1/matters?archive_state=active', () => ({
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }));
+      const matters = Array.isArray(data.matters) ? data.matters : [];
+      setMatterList(matters);
+      setMatterCatalogError(null);
+      return matters;
+    } catch (error) {
+      setMatterCatalogError(error instanceof Error ? error.message : 'Unable to load matters.');
+      return [];
+    } finally {
+      setIsMatterListLoading(false);
     }
   };
 
@@ -208,24 +252,29 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    void loadSessions().then(async (sessions) => {
+    void (async () => {
+      const sessionsPromise = loadSessions();
+      void loadMatters();
+      const loadedSessions = await sessionsPromise;
       if (cancelled) {
         return;
       }
-      if (sessions.length > 0) {
+
+      if (loadedSessions.length > 0) {
         try {
-          await loadSessionMessages(sessions[0].session_id);
+          await loadSessionMessages(loadedSessions[0].session_id);
         } catch (error) {
           if (!cancelled) {
             setHistoryError(error instanceof Error ? error.message : 'Unable to open chat session.');
           }
         }
-      } else {
-        setMessages([]);
-        setActiveSessionId(null);
-        setIsSessionLoading(false);
+        return;
       }
-    });
+
+      setMessages([]);
+      setActiveSessionId(null);
+      setIsSessionLoading(false);
+    })();
 
     return () => {
       cancelled = true;
@@ -287,6 +336,27 @@ export const ChatPage: React.FC<ChatPageProps> = ({
     setIsGenerating(false);
     setIsSessionLoading(false);
     setActiveSessionId(null);
+  };
+
+  const handleRefreshSessions = () => {
+    void loadSessions();
+  };
+
+  const handleRefreshMatters = () => {
+    void loadMatters();
+  };
+
+  const handleSelectMatter = (matterIdToLoad: string) => {
+    const normalizedMatterId = matterIdToLoad.trim();
+    if (!normalizedMatterId) {
+      setMatterError('Select a matter first.');
+      return;
+    }
+    setMatterId(normalizedMatterId);
+    setSelectedMatterId(normalizedMatterId);
+    setMatterSearchResults([]);
+    setMatterError(null);
+    void loadMatterDocuments(normalizedMatterId);
   };
 
   const handleSelectSession = async (sessionId: string) => {
@@ -461,16 +531,23 @@ export const ChatPage: React.FC<ChatPageProps> = ({
       <Sidebar
         onNewChat={handleNewChat}
         onSelectChat={handleSelectSession}
+        onRefreshSessions={handleRefreshSessions}
+        onRefreshMatters={handleRefreshMatters}
         onLogout={onLogout}
         onClose={() => setIsSidebarOpen(false)}
         userName={user.full_name}
         chatHistory={chatHistory}
         activeSessionId={activeSessionId}
         error={historyError}
+        isSessionsLoading={isSessionsLoading}
         isOpen={isSidebarOpen}
+        matters={matterList}
+        isMatterListLoading={isMatterListLoading}
+        matterCatalogError={matterCatalogError}
         matterId={matterId}
         selectedMatterId={selectedMatterId}
         onMatterIdChange={setMatterId}
+        onSelectMatter={handleSelectMatter}
         onLoadMatter={handleLoadMatter}
         onMatterFileChange={setSelectedMatterFile}
         onUploadMatterDocument={() => void handleUploadMatterDocument()}
