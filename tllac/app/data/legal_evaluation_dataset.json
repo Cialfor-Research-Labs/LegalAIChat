@@ -1,0 +1,37 @@
+[
+  {
+    "id": "eval-statute-001",
+    "category": "known_statute",
+    "question": "What statute governs cheque dishonour complaints?",
+    "expected_sources": ["Negotiable Instruments Act, 1881"],
+    "notes": "Baseline statute identification."
+  },
+  {
+    "id": "eval-section-001",
+    "category": "known_section",
+    "question": "Which section addresses dishonour of cheque for insufficiency of funds?",
+    "expected_sources": ["Section 138"],
+    "notes": "Section-level retrieval check."
+  },
+  {
+    "id": "eval-judgment-001",
+    "category": "known_judgment",
+    "question": "Summarize the leading judgment on cheque dishonour prosecution requirements.",
+    "expected_sources": ["K. Bhaskaran v. Sankaran Vaidhyan Balan"],
+    "notes": "Judgment retrieval and citation linking."
+  },
+  {
+    "id": "eval-contrary-001",
+    "category": "contrary_authority",
+    "question": "Find authority limiting broad allegations without foundational evidence.",
+    "expected_sources": ["contrary authority"],
+    "notes": "Conflicting or narrowing authority check."
+  },
+  {
+    "id": "eval-insufficient-001",
+    "category": "insufficient_evidence",
+    "question": "Can we confirm liability from an unsigned note without dates, court, or source locations?",
+    "expected_sources": [],
+    "notes": "Should trigger abstain or review_required behavior."
+  }
+]
