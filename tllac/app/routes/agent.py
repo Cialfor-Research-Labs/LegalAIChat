@@ -5,6 +5,7 @@ Agent Orchestration API router.
 from __future__ import annotations
 
 from typing import Any
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..db.db_client import db_client
@@ -13,6 +14,19 @@ from ..services.agent_orchestrator import agent_orchestrator
 from ..services.auth_service import get_current_user
 
 router = APIRouter(prefix="/v1/matters/{matter_id}/agent", tags=["agent"])
+logger = logging.getLogger("tllac.routes.agent")
+
+
+def _agent_failure_detail(response: AgentRunResponse) -> str:
+    error_text = (response.error_text or "").strip()
+    if error_text:
+        return error_text
+
+    output_text = (response.output_text or "").strip()
+    if output_text:
+        return output_text
+
+    return f"Agent command '{response.command}' failed."
 
 
 @router.post("/run", response_model=AgentRunResponse)
@@ -27,6 +41,13 @@ async def run_agent_command(
     """
     user_id = current_user["user_id"]
     try:
+        if not request.command_text.strip():
+            logger.warning("Rejected empty agent prompt for matter '%s'.", matter_id)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="command_text is required.",
+            )
+
         response = agent_orchestrator.run_agent(
             user_id=user_id,
             matter_id=matter_id,
@@ -34,9 +55,19 @@ async def run_agent_command(
             conversation_history=request.conversation_history,
         )
         if response.status == "failed":
+            detail = _agent_failure_detail(response)
+            status_code = status.HTTP_400_BAD_REQUEST
+            if "matter not found" in detail.lower():
+                status_code = status.HTTP_404_NOT_FOUND
+            logger.warning(
+                "Agent run failed for matter '%s' (command=%s): %s",
+                matter_id,
+                response.command,
+                detail,
+            )
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=response.error_text or "Agent run failed.",
+                status_code=status_code,
+                detail=detail,
             )
         return response
     except ValueError as val_err:

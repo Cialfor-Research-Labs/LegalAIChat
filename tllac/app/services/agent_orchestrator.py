@@ -62,6 +62,19 @@ class AgentOrchestrator:
         Executes an agent run for a matter with deterministic routing, state tracking,
         context assembly, approved tool invocation, and complete persistence auditing.
         """
+        if not raw_input or not raw_input.strip():
+            logger.warning("Agent run rejected because no prompt was supplied for matter '%s'.", matter_id)
+            return AgentRunResponse(
+                agent_run_id="",
+                user_id=user_id,
+                matter_id=matter_id,
+                command=AgentCommand.RESEARCH.value,
+                status=AgentRunState.FAILED,
+                error_text="Agent prompt is required.",
+                token_count=0,
+                tool_calls=[],
+            )
+
         # 1. Deterministic Application-Code Parsing (NO model call!)
         command, query = self.parse_command(raw_input)
         logger.info(f"Routed command '{command.value}' deterministically for matter '{matter_id}'")
@@ -104,6 +117,11 @@ class AgentOrchestrator:
                 conversation_history=conversation_history,
                 max_tokens=3000,
             )
+            if not context.selected_documents:
+                logger.info(
+                    "No uploaded matter documents were found while building context for matter '%s'.",
+                    matter_id,
+                )
             context_snapshot = context.model_dump()
 
             db_client.update_agent_run(
@@ -165,10 +183,17 @@ class AgentOrchestrator:
             # 4. Command Workflows Execution
             output_text = ""
             final_state = AgentRunState.COMPLETED
+            error_text: str | None = None
 
             if not command_enabled(command.value):
                 final_state = AgentRunState.FAILED
                 output_text = f"{command.value} is disabled until advanced agent commands are enabled."
+                error_text = output_text
+                logger.warning(
+                    "Agent command '%s' is disabled for matter '%s'.",
+                    command.value,
+                    matter_id,
+                )
 
             elif command == AgentCommand.TIMELINE:
                 db_client.update_agent_run(
@@ -480,6 +505,7 @@ class AgentOrchestrator:
                 command=command.value,
                 status=final_state,
                 output_text=output_text,
+                error_text=error_text,
                 token_count=total_tokens,
                 context_snapshot=context_snapshot,
                 tool_calls=tool_call_records,
@@ -488,7 +514,7 @@ class AgentOrchestrator:
             )
 
         except Exception as ex:
-            logger.error(f"Agent run failed for matter '{matter_id}': {ex}")
+            logger.exception("Agent run failed for matter '%s'.", matter_id)
             err_msg = str(ex)
             now = datetime.now(timezone.utc)
             db_client.update_agent_run(

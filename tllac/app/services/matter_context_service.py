@@ -73,6 +73,8 @@ class MatterContextService:
 
         # Selected Documents (Truncating extracted_text if needed)
         docs = db_client.list_matter_documents(user_id, matter_id)[:5]
+        if not docs:
+            logger.info("No uploaded matter documents found for matter '%s' while building context.", matter_id)
         selected_documents = []
         for doc in docs:
             extracted = doc.get("extracted_text") or ""
