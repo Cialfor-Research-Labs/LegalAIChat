@@ -183,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         onClick={onClose}
         className="fixed inset-0 z-20 bg-black/30 backdrop-blur-[1px] md:hidden"
       />
-      <aside className="absolute inset-y-0 left-0 z-30 flex h-full w-72 flex-col overflow-hidden border-r border-outline-variant/20 bg-surface-container shadow-ambient md:relative md:z-0 md:shadow-none">
+      <aside className="absolute inset-y-0 left-0 z-30 flex h-full w-72 flex-col overflow-y-auto overflow-x-hidden border-r border-outline-variant/20 bg-surface-container shadow-ambient md:relative md:z-0 md:shadow-none">
         <div className="shrink-0 border-b border-outline-variant/20 bg-surface-container p-4">
           <div className="mb-4 flex items-center justify-between md:hidden">
             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
@@ -369,7 +369,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="flex-none p-3">
           <div className="mb-3 flex items-center justify-between gap-2 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-on-surface-variant">
             <div className="flex items-center gap-2">
               <Shield size={13} />
