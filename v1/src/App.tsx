@@ -1,10 +1,25 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Bell, BriefcaseBusiness, ChevronDown, Command, FileStack, LayoutDashboard, LogOut, Search, Settings, Users } from 'lucide-react';
 import { betaConfig } from './core/betaConfig';
-import { clearSession, fetchV1Status, getStoredToken, getStoredUser, V1AuthResult, V1User } from './core/api';
+import {
+  clearSession,
+  createMatter,
+  fetchMatterOverview,
+  fetchV1Status,
+  getStoredToken,
+  getStoredUser,
+  listMatters,
+  Matter,
+  MatterCreateInput,
+  MatterOverview,
+  runMatterAgent,
+  V1AuthResult,
+  V1User,
+} from './core/api';
 import { LoginPage } from './features/auth/LoginPage';
 import { CaseAgentPanel } from './features/case-agent/CaseAgentPanel';
-import { MatterWorkspace } from './features/matters/MatterWorkspace';
+import { CreateMatterDialog } from './features/matters/CreateMatterDialog';
+import { MatterTab, MatterWorkspace } from './features/matters/MatterWorkspace';
 import { SourcePanel } from './features/research/SourcePanel';
 
 const navigation = [
@@ -20,6 +35,14 @@ type AppState = 'checking' | 'disabled' | 'login' | 'workspace';
 export function App() {
   const [appState, setAppState]   = useState<AppState>('checking');
   const [user, setUser]           = useState<V1User | null>(null);
+  const [matters, setMatters] = useState<Matter[]>([]);
+  const [selectedMatterId, setSelectedMatterId] = useState<string | null>(null);
+  const [overview, setOverview] = useState<MatterOverview | null>(null);
+  const [activeTab, setActiveTab] = useState<MatterTab>('Overview');
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
 
   // ── Bootstrap: check feature flag + restore session ──────────────────────
   useEffect(() => {
@@ -55,6 +78,51 @@ export function App() {
     setUser(null);
     setAppState('login');
   }, []);
+
+  const openMatter = useCallback(async (matterId: string) => {
+    setSelectedMatterId(matterId);
+    setIsWorkspaceLoading(true);
+    setWorkspaceError(null);
+    try {
+      setOverview(await fetchMatterOverview(matterId));
+      setActiveTab('Overview');
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Unable to load the matter.');
+    } finally {
+      setIsWorkspaceLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (appState !== 'workspace') return;
+    let cancelled = false;
+    setIsWorkspaceLoading(true);
+    void listMatters().then(async (items) => {
+      if (cancelled) return;
+      setMatters(items);
+      if (items.length) await openMatter(items[0].matter_id);
+    }).catch((error) => {
+      if (!cancelled) setWorkspaceError(error instanceof Error ? error.message : 'Unable to load matters.');
+    }).finally(() => {
+      if (!cancelled) setIsWorkspaceLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [appState, openMatter]);
+
+  const handleCreateMatter = async (input: MatterCreateInput) => {
+    setIsCreating(true);
+    setWorkspaceError(null);
+    try {
+      const matter = await createMatter(input);
+      setMatters((current) => [matter, ...current]);
+      setIsCreateOpen(false);
+      await openMatter(matter.matter_id);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Unable to create the matter.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   // ── Render states ─────────────────────────────────────────────────────────
   if (appState === 'checking') {
@@ -116,11 +184,21 @@ export function App() {
 
       <div className="app-frame">
         <aside className="primary-sidebar">
-          <button className="new-matter" disabled>+ New matter</button>
+          <button className="new-matter" onClick={() => setIsCreateOpen(true)}>+ New matter</button>
           <nav>
             {navigation.map(({ label, icon: Icon, active }) => (
-              <button className={active ? 'active' : ''} disabled key={label}>
+              <button className={active ? 'active' : ''} disabled={!active} key={label}>
                 <Icon size={17} />{label}
+              </button>
+            ))}
+            {matters.map((matter) => (
+              <button
+                className={`matter-nav-item ${selectedMatterId === matter.matter_id ? 'active' : ''}`}
+                key={matter.matter_id}
+                onClick={() => void openMatter(matter.matter_id)}
+                title={matter.title}
+              >
+                <BriefcaseBusiness size={15} />{matter.title}
               </button>
             ))}
           </nav>
@@ -131,11 +209,35 @@ export function App() {
         </aside>
 
         <div className="workspace-grid">
-          <MatterWorkspace />
-          <CaseAgentPanel />
+          <MatterWorkspace
+            overview={overview}
+            activeTab={activeTab}
+            isLoading={isWorkspaceLoading}
+            error={workspaceError}
+            onTabChange={setActiveTab}
+            onCreateMatter={() => setIsCreateOpen(true)}
+          />
+          <CaseAgentPanel
+            matter={overview?.matter_details ?? null}
+            overview={overview}
+            onRun={async (command) => {
+              if (!selectedMatterId) throw new Error('Select a matter first.');
+              const result = await runMatterAgent(selectedMatterId, command);
+              if (result.status === 'failed') throw new Error(result.error_text || 'The Case Agent failed.');
+              return result.output_text || 'The command completed without output.';
+            }}
+          />
           <SourcePanel />
         </div>
       </div>
+      {isCreateOpen && (
+        <CreateMatterDialog
+          isSaving={isCreating}
+          error={workspaceError}
+          onClose={() => !isCreating && setIsCreateOpen(false)}
+          onCreate={handleCreateMatter}
+        />
+      )}
     </div>
   );
 }

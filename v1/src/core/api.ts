@@ -78,6 +78,72 @@ async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+export interface Matter {
+  matter_id: string;
+  title: string;
+  description: string;
+  case_number: string | null;
+  court: string | null;
+  jurisdiction: string | null;
+  stage: string | null;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MatterOverview {
+  matter_details: Matter;
+  parties: Record<string, unknown>[];
+  counsel: Record<string, unknown>[];
+  hearings: Record<string, unknown>[];
+  open_tasks: Record<string, unknown>[];
+  notes: Record<string, unknown>[];
+  timeline_events: Record<string, unknown>[];
+  documents: Record<string, unknown>[];
+  research: Record<string, unknown>[];
+  drafts: Record<string, unknown>[];
+}
+
+export interface MatterCreateInput {
+  title: string;
+  description: string;
+  case_number?: string;
+  court?: string;
+  jurisdiction?: string;
+  stage?: string;
+}
+
+export interface AgentRunResult {
+  agent_run_id: string;
+  command: string;
+  status: string;
+  output_text: string | null;
+  error_text: string | null;
+}
+
+export async function listMatters(): Promise<Matter[]> {
+  const result = await apiFetch<{ matters: Matter[] }>('/v1/matters');
+  return result.matters;
+}
+
+export function createMatter(input: MatterCreateInput): Promise<Matter> {
+  return apiFetch<Matter>('/v1/matters', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function fetchMatterOverview(matterId: string): Promise<MatterOverview> {
+  return apiFetch<MatterOverview>(`/v1/matters/${matterId}/overview`);
+}
+
+export function runMatterAgent(matterId: string, commandText: string): Promise<AgentRunResult> {
+  return apiFetch<AgentRunResult>(`/v1/matters/${matterId}/agent/run`, {
+    method: 'POST',
+    body: JSON.stringify({ command_text: commandText, conversation_history: [] }),
+  });
+}
+
 function authHeaders(): Record<string, string> {
   const token = getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
