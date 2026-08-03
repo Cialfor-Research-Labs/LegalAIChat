@@ -259,6 +259,206 @@ h1, h2, p { margin-top: 0; }
 .dialog-actions button { padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: white; }
 .dialog-actions .primary { color: white; border-color: var(--green); background: var(--green); font-weight: 700; }
 
+.utility-panel-dialog {
+  width: min(760px, 100%);
+  padding: 22px;
+}
+
+.utility-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.utility-panel-header h2 {
+  margin: 6px 0 0;
+}
+
+.utility-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  background: white;
+  flex: 0 0 auto;
+}
+
+.utility-close:hover {
+  color: var(--ink);
+  border-color: #c8d0ca;
+  background: #fafaf7;
+}
+
+.utility-panel-body {
+  display: grid;
+  gap: 16px;
+}
+
+.utility-panel-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.utility-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.utility-summary-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8f7f2;
+}
+
+.utility-summary-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.utility-summary-card strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.utility-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.utility-action-button {
+  display: grid;
+  gap: 4px;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: left;
+  background: white;
+  color: var(--ink);
+  transition: border-color .15s ease, background-color .15s ease, transform .15s ease;
+}
+
+.utility-action-button strong {
+  font-size: 13px;
+}
+
+.utility-action-button span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.utility-action-button:hover {
+  border-color: #cfd8d2;
+  background: #fbfbf8;
+  transform: translateY(-1px);
+}
+
+.utility-action-button.primary {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+
+.utility-action-button.primary:hover {
+  border-color: var(--green);
+  background: #ddebe4;
+}
+
+.utility-search-field {
+  display: grid;
+  gap: 6px;
+}
+
+.utility-search-field span {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.utility-search-field input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fafaf7;
+  outline: none;
+  font-size: 12px;
+}
+
+.utility-search-field input:focus {
+  border-color: var(--green);
+}
+
+.utility-list {
+  display: grid;
+  gap: 10px;
+  max-height: 280px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.utility-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fcfcfa;
+}
+
+.utility-list-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.utility-list-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.utility-list-copy span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.utility-action-pill {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--green);
+  background: var(--green-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.utility-empty-state {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* ── Matter Dialog Upload & Dropzone ────────────────────────────────────────── */
 .matter-upload-section {
   margin-bottom: 16px;
