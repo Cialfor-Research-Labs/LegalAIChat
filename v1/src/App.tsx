@@ -25,12 +25,12 @@ import { SourcePanel } from './features/research/SourcePanel';
 
 type WorkspaceSection = 'dashboard' | 'matters' | 'documents' | 'review-queue' | 'team';
 
-const navigation: { id: WorkspaceSection; label: string; icon: React.ElementType }[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'matters', label: 'Matters', icon: BriefcaseBusiness },
-  { id: 'documents', label: 'Documents', icon: FileStack },
-  { id: 'review-queue', label: 'Review queue', icon: Command },
-  { id: 'team', label: 'Team', icon: Users },
+const navigation = [
+  { label: 'Dashboard', icon: LayoutDashboard, section: 'dashboard' as const },
+  { label: 'Matters', icon: BriefcaseBusiness, section: 'matters' as const },
+  { label: 'Documents', icon: FileStack, section: 'documents' as const },
+  { label: 'Review queue', icon: Command, section: 'review-queue' as const },
+  { label: 'Team', icon: Users, section: 'team' as const },
 ];
 
 type AppState = 'checking' | 'disabled' | 'login' | 'workspace';
@@ -427,11 +427,11 @@ export function App() {
         <aside className="primary-sidebar">
           <button className="new-matter" onClick={() => setIsCreateOpen(true)}>+ New matter</button>
           <nav>
-            {navigation.map(({ id, label, icon: Icon }) => (
+            {navigation.map(({ label, icon: Icon, section }) => (
               <button
-                className={activeSection === id ? 'active' : ''}
-                key={id}
-                onClick={() => handleNavigate(id)}
+                key={label}
+                className={activeSection === section ? 'active' : ''}
+                onClick={() => handleNavigate(section)}
               >
                 <Icon size={17} />{label}
               </button>
@@ -454,17 +454,24 @@ export function App() {
         </aside>
 
         <div className="workspace-grid">
-          {activeSection === 'dashboard' && renderDashboardPanel()}
-          {activeSection === 'documents' && renderDocumentsPanel()}
-          {activeSection === 'review-queue' && renderReviewQueuePanel()}
-          {activeSection === 'team' && renderTeamPanel()}
-          {activeSection === 'matters' && (
+          {activeSection === 'dashboard' ? (
+            renderDashboardPanel()
+          ) : activeSection === 'documents' ? (
+            renderDocumentsPanel()
+          ) : activeSection === 'review-queue' ? (
+            renderReviewQueuePanel()
+          ) : activeSection === 'team' ? (
+            renderTeamPanel()
+          ) : (
             <MatterWorkspace
               overview={overview}
               activeTab={activeTab}
               isLoading={isWorkspaceLoading}
               error={workspaceError}
-              onTabChange={setActiveTab}
+              onTabChange={(tab) => {
+                setActiveSection('matters');
+                setActiveTab(tab);
+              }}
               onCreateMatter={() => setIsCreateOpen(true)}
             />
           )}

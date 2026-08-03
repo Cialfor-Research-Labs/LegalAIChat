@@ -323,6 +323,11 @@ def run_research(
     evidence_sources = _build_evidence_pack(user_id, matter_id, query, plan)
 
     if not evidence_sources:
+        logger.warning(
+            "No research evidence sources were found for matter '%s' and query '%s'.",
+            matter_id,
+            query,
+        )
         draft = ResearchDraft(
             memo_title="Verified Research Memo",
             memo_summary="No sufficient evidence sources were found for this research request.",
@@ -342,6 +347,11 @@ def run_research(
             output_text=verification.memo_text,
         )
 
+    logger.info(
+        "Built research evidence pack for matter '%s' with %d sources.",
+        matter_id,
+        len(evidence_sources),
+    )
     system_prompt, prompt = _build_research_prompt(
         matter_context=matter_context,
         plan=plan,
@@ -353,7 +363,14 @@ def run_research(
         system_prompt=system_prompt,
         apply_guardrails=False,
     )
+    if "temporarily unavailable" in raw_response.lower():
+        logger.warning("LLM returned an availability fallback while researching matter '%s'.", matter_id)
     draft = parse_research_draft(raw_response)
+    if "not valid json" in draft.review_notes.lower():
+        logger.warning(
+            "Research parsing fell back to a summary because the model response was not valid JSON for matter '%s'.",
+            matter_id,
+        )
     verification = verify_research_draft(draft, evidence_sources)
 
     saved_research: dict[str, Any] | None = None

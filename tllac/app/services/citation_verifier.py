@@ -114,7 +114,8 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 def parse_research_draft(text: str) -> ResearchDraft:
     try:
         payload = _extract_json_object(text)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Research response parsing failed; falling back to plain-text summary: %s", exc)
         payload = {
             "memo_title": "Verified Research Memo",
             "memo_summary": (text or "").strip(),
