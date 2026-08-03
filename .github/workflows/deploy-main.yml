@@ -60,7 +60,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: |
+            ui/package-lock.json
+            v1/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: ui
@@ -76,6 +78,16 @@ jobs:
           VITE_TLLAC_API_URL: /tllac-api
         run: npm run build
 
+      - name: Install V1 frontend dependencies
+        working-directory: v1
+        run: npm ci --include=optional
+
+      - name: Build V1 frontend
+        working-directory: v1
+        env:
+          VITE_V1_API_BASE: /tllac-api
+        run: npm run build
+
       # ----------------------------------
       # Create deployment package
       # ----------------------------------
@@ -85,10 +97,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p release/ui
+          mkdir -p release/ui release/v1
 
           cp -a tllac release/tllac
           cp -a ui/dist release/ui/dist
+          cp -a v1/dist release/v1/dist
 
           # Server-managed files must never be deployed from Git.
           rm -f release/tllac/.env
@@ -152,6 +165,7 @@ jobs:
 
             test -f "${STAGE}/tllac/requirements.txt"
             test -f "${STAGE}/ui/dist/index.html"
+            test -f "${STAGE}/v1/dist/index.html"
 
             # Update backend code while preserving:
             # - tllac/.env
@@ -175,6 +189,17 @@ jobs:
               --chown=legalai:legalai \
               "${STAGE}/ui/dist/" \
               "${APP_ROOT}/ui/dist/"
+
+            # Replace only the compiled V1 frontend.
+            sudo install -d \
+              -o legalai \
+              -g legalai \
+              "${APP_ROOT}/v1/dist"
+
+            sudo rsync -a --delete \
+              --chown=legalai:legalai \
+              "${STAGE}/v1/dist/" \
+              "${APP_ROOT}/v1/dist/"
 
             # Create the virtual environment only when missing.
             if [ ! -x "${APP_ROOT}/tllac/.venv/bin/python" ]; then
@@ -244,6 +269,31 @@ jobs:
             fi
 
             echo "Frontend is healthy"
+
+            # Restart the standalone V1 frontend service.
+            sudo systemctl reset-failed legalai-v1-frontend.service
+            sudo systemctl restart legalai-v1-frontend.service
+
+            sleep 2
+
+            # Check the standalone V1 frontend on port 3001.
+            if ! curl -fsS http://127.0.0.1:3001/ >/dev/null; then
+              echo "V1 frontend health check failed"
+
+              sudo systemctl status \
+                legalai-v1-frontend.service \
+                --full \
+                --no-pager || true
+
+              sudo journalctl \
+                -u legalai-v1-frontend.service \
+                -n 100 \
+                --no-pager || true
+
+              exit 1
+            fi
+
+            echo "V1 frontend is healthy"
 
             # Check Nginx-to-FastAPI proxy.
             if ! curl -fsS http://127.0.0.1/tllac-api/ >/dev/null; then
