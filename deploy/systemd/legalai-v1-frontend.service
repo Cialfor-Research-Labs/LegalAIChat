@@ -1,0 +1,28 @@
+[Unit]
+Description=LegalAI V1 Frontend
+Documentation=https://www.npmjs.com/package/serve
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/LegalAIChat/v1/dist/index.html
+
+[Service]
+Type=simple
+User=legalai
+Group=legalai
+WorkingDirectory=/opt/LegalAIChat/v1/dist
+Environment=NODE_ENV=production
+
+ExecStart=/opt/LegalAIChat/v1-server/node_modules/.bin/serve --single --no-clipboard --listen tcp://0.0.0.0:3001 /opt/LegalAIChat/v1/dist
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

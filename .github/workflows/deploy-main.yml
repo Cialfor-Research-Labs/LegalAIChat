@@ -97,11 +97,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p release/ui release/v1
+          mkdir -p release/ui release/v1 release/systemd
 
           cp -a tllac release/tllac
           cp -a ui/dist release/ui/dist
           cp -a v1/dist release/v1/dist
+          cp deploy/systemd/legalai-v1-frontend.service release/systemd/
 
           # Server-managed files must never be deployed from Git.
           rm -f release/tllac/.env
@@ -166,6 +167,7 @@ jobs:
             test -f "${STAGE}/tllac/requirements.txt"
             test -f "${STAGE}/ui/dist/index.html"
             test -f "${STAGE}/v1/dist/index.html"
+            test -f "${STAGE}/systemd/legalai-v1-frontend.service"
 
             # Update backend code while preserving:
             # - tllac/.env
@@ -200,6 +202,13 @@ jobs:
               --chown=legalai:legalai \
               "${STAGE}/v1/dist/" \
               "${APP_ROOT}/v1/dist/"
+
+            # Keep the V1 service definition in sync with the application.
+            sudo install -m 0644 \
+              "${STAGE}/systemd/legalai-v1-frontend.service" \
+              /etc/systemd/system/legalai-v1-frontend.service
+
+            sudo systemctl daemon-reload
 
             # Create the virtual environment only when missing.
             if [ ! -x "${APP_ROOT}/tllac/.venv/bin/python" ]; then
@@ -271,27 +280,34 @@ jobs:
             echo "Frontend is healthy"
 
             # Restart the standalone V1 frontend service.
+            test -x "${APP_ROOT}/v1-server/node_modules/.bin/serve"
             sudo systemctl reset-failed legalai-v1-frontend.service
             sudo systemctl restart legalai-v1-frontend.service
 
-            sleep 2
+            # Wait up to 30 seconds for the V1 static server.
+            ATTEMPT=0
 
-            # Check the standalone V1 frontend on port 3001.
-            if ! curl -fsS http://127.0.0.1:3001/ >/dev/null; then
-              echo "V1 frontend health check failed"
+            until curl -fsS http://127.0.0.1:3001/ >/dev/null; do
+              ATTEMPT=$((ATTEMPT + 1))
 
-              sudo systemctl status \
-                legalai-v1-frontend.service \
-                --full \
-                --no-pager || true
+              if [ "${ATTEMPT}" -ge 30 ]; then
+                echo "V1 frontend health check failed"
 
-              sudo journalctl \
-                -u legalai-v1-frontend.service \
-                -n 100 \
-                --no-pager || true
+                sudo systemctl status \
+                  legalai-v1-frontend.service \
+                  --full \
+                  --no-pager || true
 
-              exit 1
-            fi
+                sudo journalctl \
+                  -u legalai-v1-frontend.service \
+                  -n 100 \
+                  --no-pager || true
+
+                exit 1
+              fi
+
+              sleep 1
+            done
 
             echo "V1 frontend is healthy"
 
