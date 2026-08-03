@@ -51,6 +51,15 @@ class ChatRequest(BaseModel):
         default=None,
         description="Optional chat session id for remembering previous messages.",
     )
+    matter_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Optional matter id used to ground the response in uploaded documents.",
+    )
+    personalization: dict[str, object] | None = Field(
+        default=None,
+        description="Optional response presentation and user-context preferences.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -652,10 +661,11 @@ async def chat_endpoint(
         online_research_context = build_online_legal_research_context(session_legal_context)
 
     matter_document_context = ""
-    if request.matter_id:
+    matter_id = (request.matter_id or "").strip()
+    if matter_id:
         matter_document_context = build_matter_document_context(
             current_user["user_id"],
-            request.matter_id.strip(),
+            matter_id,
             query,
         )
 
