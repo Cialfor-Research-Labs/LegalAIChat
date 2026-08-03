@@ -21,7 +21,6 @@ import { LoginPage } from './features/auth/LoginPage';
 import { CaseAgentPanel } from './features/case-agent/CaseAgentPanel';
 import { CreateMatterDialog } from './features/matters/CreateMatterDialog';
 import { MatterTab, MatterWorkspace } from './features/matters/MatterWorkspace';
-import { SourcePanel } from './features/research/SourcePanel';
 
 type WorkspaceSection = 'dashboard' | 'matters' | 'documents' | 'review-queue' | 'team';
 
@@ -42,6 +41,7 @@ export function App() {
   const [selectedMatterId, setSelectedMatterId] = useState<string | null>(null);
   const [overview, setOverview] = useState<MatterOverview | null>(null);
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('matters');
+  const [sidebarPanel, setSidebarPanel] = useState<WorkspaceSection | null>(null);
   const [activeTab, setActiveTab] = useState<MatterTab>('Overview');
   const [utilityPanel, setUtilityPanel] = useState<'settings' | 'search' | 'notifications' | 'context' | 'source' | null>(null);
   const [utilityQuery, setUtilityQuery] = useState('');
@@ -116,6 +116,9 @@ export function App() {
 
   const handleNavigate = useCallback((section: WorkspaceSection) => {
     setActiveSection(section);
+    setSidebarPanel(section);
+    setUtilityPanel(null);
+    setUtilityQuery('');
     if (section === 'documents') {
       setActiveTab('Documents');
       return;
@@ -131,6 +134,16 @@ export function App() {
     setUtilityPanel(null);
     setUtilityQuery('');
   }, []);
+
+  const openUtilityPanel = useCallback((panel: NonNullable<typeof utilityPanel>) => {
+    setSidebarPanel(null);
+    setUtilityPanel(panel);
+  }, []);
+
+  const closeSidePanels = useCallback(() => {
+    setSidebarPanel(null);
+    closeUtilityPanel();
+  }, [closeUtilityPanel]);
 
   const selectedMatter = overview?.matter_details ?? matters.find((matter) => matter.matter_id === selectedMatterId) ?? null;
 
@@ -599,24 +612,74 @@ export function App() {
     }
 
     return (
-      <div
-        className="dialog-backdrop"
-        role="presentation"
-        onMouseDown={(event) => event.target === event.currentTarget && closeUtilityPanel()}
-      >
-        <div className="matter-dialog utility-panel-dialog" role="dialog" aria-modal="true" aria-label={title}>
-          <div className="utility-panel-header">
-            <div>
-              <div className="eyebrow">Workspace</div>
-              <h2>{title}</h2>
-            </div>
-            <button type="button" className="utility-close" onClick={closeUtilityPanel} aria-label="Close panel">
-              <X size={18} />
-            </button>
+      <>
+        <button className="drawer-backdrop" aria-label="Close panel" onClick={closeUtilityPanel} />
+        <aside className="side-drawer utility-drawer" role="dialog" aria-modal="true" aria-label={title}>
+          <div>
+            <div className="eyebrow">Workspace</div>
+            <h2>{title}</h2>
           </div>
           {body}
-        </div>
-      </div>
+          <div className="dialog-actions">
+            <button type="button" onClick={closeUtilityPanel}>Close</button>
+          </div>
+        </aside>
+      </>
+    );
+  };
+
+  const renderWorkspaceDrawer = () => {
+    if (!sidebarPanel) return null;
+
+    const panel = sidebarPanel === 'dashboard'
+      ? renderDashboardPanel()
+      : sidebarPanel === 'documents'
+        ? renderDocumentsPanel()
+        : sidebarPanel === 'review-queue'
+          ? renderReviewQueuePanel()
+          : sidebarPanel === 'team'
+            ? renderTeamPanel()
+            : (
+              <MatterWorkspace
+                overview={overview}
+                activeTab={activeTab}
+                isLoading={isWorkspaceLoading}
+                error={workspaceError}
+                onTabChange={(tab) => {
+                  setActiveSection('matters');
+                  setActiveTab(tab);
+                }}
+                onCreateMatter={() => setIsCreateOpen(true)}
+              />
+            );
+
+    return (
+      <>
+        <button className="drawer-backdrop" aria-label="Close panel" onClick={closeSidePanels} />
+        <aside className="side-drawer workspace-drawer" aria-label={`${sidebarPanel} options`}>
+          <header className="drawer-header">
+            <strong>{navigation.find((item) => item.section === sidebarPanel)?.label ?? 'Matters'}</strong>
+            <button type="button" aria-label="Close panel" onClick={closeSidePanels}>×</button>
+          </header>
+          {sidebarPanel === 'matters' && matters.length > 0 && (
+            <div className="drawer-matter-list" aria-label="Your matters">
+              <span className="drawer-section-label">Your matters</span>
+              {matters.map((matter) => (
+                <button
+                  type="button"
+                  key={matter.matter_id}
+                  className={selectedMatterId === matter.matter_id ? 'active' : ''}
+                  onClick={() => void openMatter(matter.matter_id)}
+                >
+                  <BriefcaseBusiness size={15} />
+                  <span>{matter.title}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {panel}
+        </aside>
+      </>
     );
   };
 
@@ -663,8 +726,8 @@ export function App() {
         </div>
         <div className="isolation-notice">{betaConfig.dataMode}</div>
         <div className="topbar-actions">
-          <button aria-label="Search" onClick={() => setUtilityPanel('search')}><Search size={18} /></button>
-          <button aria-label="Notifications" onClick={() => setUtilityPanel('notifications')}><Bell size={18} /></button>
+          <button aria-label="Search" onClick={() => openUtilityPanel('search')}><Search size={18} /></button>
+          <button aria-label="Notifications" onClick={() => openUtilityPanel('notifications')}><Bell size={18} /></button>
           <div className="profile" title={user?.full_name}>{initials}</div>
           <ChevronDown size={15} />
           <button
@@ -680,60 +743,31 @@ export function App() {
 
       <div className="app-frame">
         <aside className="primary-sidebar">
-          <button className="new-matter" onClick={() => setIsCreateOpen(true)}>+ New matter</button>
+          <button className="new-matter" aria-label="New matter" title="New matter" onClick={() => setIsCreateOpen(true)}>+</button>
           <nav>
             {navigation.map(({ label, icon: Icon, section }) => (
               <button
                 key={label}
-                className={activeSection === section ? 'active' : ''}
-                onClick={() => handleNavigate(section)}
+                className={sidebarPanel === section ? 'active' : ''}
+                onClick={() => sidebarPanel === section ? setSidebarPanel(null) : handleNavigate(section)}
+                aria-label={label}
+                title={label}
               >
-                <Icon size={17} />{label}
-              </button>
-            ))}
-            {matters.map((matter) => (
-              <button
-                className={`matter-nav-item ${selectedMatterId === matter.matter_id && activeSection === 'matters' ? 'active' : ''}`}
-                key={matter.matter_id}
-                onClick={() => void openMatter(matter.matter_id)}
-                title={matter.title}
-              >
-                <BriefcaseBusiness size={15} />{matter.title}
+                <Icon size={19} /><span>{label}</span>
               </button>
             ))}
           </nav>
           <div className="sidebar-footer">
-            <button onClick={() => setUtilityPanel('settings')}><Settings size={17} /> Settings</button>
-            <div className="build-label">{betaConfig.releaseStage} build</div>
+            <button onClick={() => openUtilityPanel('settings')} aria-label="Settings" title="Settings"><Settings size={19} /><span>Settings</span></button>
+            <div className="build-label">{betaConfig.releaseStage}</div>
           </div>
         </aside>
 
         <div className="workspace-grid">
-          {activeSection === 'dashboard' ? (
-            renderDashboardPanel()
-          ) : activeSection === 'documents' ? (
-            renderDocumentsPanel()
-          ) : activeSection === 'review-queue' ? (
-            renderReviewQueuePanel()
-          ) : activeSection === 'team' ? (
-            renderTeamPanel()
-          ) : (
-            <MatterWorkspace
-              overview={overview}
-              activeTab={activeTab}
-              isLoading={isWorkspaceLoading}
-              error={workspaceError}
-              onTabChange={(tab) => {
-                setActiveSection('matters');
-                setActiveTab(tab);
-              }}
-              onCreateMatter={() => setIsCreateOpen(true)}
-            />
-          )}
           <CaseAgentPanel
             matter={overview?.matter_details ?? null}
             overview={overview}
-            onOpenContext={() => setUtilityPanel('context')}
+            onOpenContext={() => openUtilityPanel('context')}
             onRun={async (command) => {
               if (!selectedMatterId) throw new Error('Select a matter first.');
               const result = await runMatterAgent(selectedMatterId, command);
@@ -742,7 +776,6 @@ export function App() {
             }}
             onRefreshOverview={() => selectedMatterId && openMatter(selectedMatterId)}
           />
-          <SourcePanel onOpenCanonicalSource={() => setUtilityPanel('source')} />
         </div>
       </div>
 
@@ -754,6 +787,7 @@ export function App() {
           onCreate={handleCreateMatter}
         />
       )}
+      {renderWorkspaceDrawer()}
       {renderUtilityPanel()}
     </div>
   );
